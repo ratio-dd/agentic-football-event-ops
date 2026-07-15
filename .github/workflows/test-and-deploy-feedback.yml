@@ -50,7 +50,7 @@ jobs:
   deploy-feedback:
     name: Deploy feedback to Lightsail
     needs: test
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.FEEDBACK_HOSTED_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: feedback
