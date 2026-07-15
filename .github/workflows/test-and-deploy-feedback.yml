@@ -33,6 +33,15 @@ jobs:
           ADMIN_PIN=meetup-admin
           EOF
       - run: npm test
+      - name: Build Lightsail runtime for deployment
+        run: npm run lightsail:build
+      - name: Upload validated Lightsail runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: lightsail-runtime
+          path: lightsail/runtime
+          if-no-files-found: error
+          retention-days: 1
 
   deploy-feedback:
     name: Deploy feedback to Lightsail
@@ -45,12 +54,11 @@ jobs:
       DEPLOY_PATH: /home/ubuntu/agentic-football-event-ops
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Download validated Lightsail runtime
+        uses: actions/download-artifact@v4
         with:
-          node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run lightsail:build
+          name: lightsail-runtime
+          path: lightsail/runtime
       - name: Upload validated source
         run: |
           rsync -az --delete \
@@ -63,10 +71,36 @@ jobs:
             --exclude 'lightsail/.tls/' \
             --exclude 'lightsail/.acme/' \
             ./ "$DEPLOY_PATH/"
-      - name: Rebuild and restart feedback service
+      - name: Build candidate, verify health, and roll back on failure
         run: |
           set -euo pipefail
           cd /home/ubuntu/agentic-football-event-ops
-          sudo docker build -t agentic-football-event-ops:feedback -f lightsail/Dockerfile .
-          sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --force-recreate app caddy
-          sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml ps
+          compose=(sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml)
+          previous_image="$(sudo docker inspect --format '{{.Config.Image}}' agentic-football-feedback 2>/dev/null || true)"
+          candidate_image="agentic-football-event-ops:feedback-${GITHUB_SHA}"
+
+          rollback() {
+            echo "Candidate deployment failed; preserving diagnostics and restoring the previous app image."
+            sudo docker logs --tail 150 agentic-football-feedback || true
+            if [ -n "$previous_image" ]; then
+              sudo env APP_IMAGE="$previous_image" docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --no-deps --force-recreate app || true
+            fi
+          }
+          trap rollback ERR
+
+          sudo docker build -t "$candidate_image" -f lightsail/Dockerfile .
+          sudo env APP_IMAGE="$candidate_image" docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --no-deps --force-recreate app
+
+          for attempt in $(seq 1 12); do
+            health="$(sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' agentic-football-feedback)"
+            if [ "$health" = healthy ]; then
+              break
+            fi
+            echo "Waiting for app health ($attempt/12): $health"
+            sleep 5
+          done
+
+          [ "$(sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' agentic-football-feedback)" = healthy ]
+          curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --insecure https://127.0.0.1/healthz
+          "${compose[@]}" ps
+          sudo docker tag "$candidate_image" agentic-football-event-ops:feedback

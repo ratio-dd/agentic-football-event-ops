@@ -23,7 +23,21 @@ const server = createServer(async (incoming, outgoing) => {
     const protocol = incoming.headers["x-forwarded-proto"] || "http";
     const host = incoming.headers.host || "localhost";
     const method = incoming.method || "GET";
-    const request = new Request(new URL(incoming.url || "/", `${protocol}://${host}`), {
+    const url = new URL(incoming.url || "/", `${protocol}://${host}`);
+
+    // Keep this probe independent from the Worker routing and event state. The
+    // lightweight SELECT still proves that the mounted SQLite volume is usable.
+    if (method === "GET" && url.pathname === "/healthz") {
+      await db.prepare("SELECT 1 AS ok").first();
+      outgoing.writeHead(200, {
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+      });
+      outgoing.end(JSON.stringify({ status: "ok", database: "ok" }));
+      return;
+    }
+
+    const request = new Request(url, {
       method,
       headers: incoming.headers,
       body: ["GET", "HEAD"].includes(method) ? undefined : Readable.toWeb(incoming),
