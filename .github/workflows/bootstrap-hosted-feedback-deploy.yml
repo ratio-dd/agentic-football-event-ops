@@ -11,6 +11,7 @@ jobs:
     name: Install restricted deployment key
     runs-on: [self-hosted, linux, feedback]
     timeout-minutes: 10
+    environment: feedback
     env:
       DEPLOY_PATH: /home/ubuntu/agentic-football-event-ops
       DEPLOY_PUBLIC_KEY: ${{ vars.FEEDBACK_DEPLOY_PUBLIC_KEY }}
