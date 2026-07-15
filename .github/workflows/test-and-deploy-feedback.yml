@@ -33,13 +33,17 @@ jobs:
           ADMIN_PIN=meetup-admin
           EOF
       - run: npm test
-      - name: Build Lightsail runtime for deployment
-        run: npm run lightsail:build
-      - name: Upload validated Lightsail runtime
+      - name: Build immutable Lightsail image on the hosted runner
+        run: |
+          npm run lightsail:build
+          image="agentic-football-event-ops:feedback-${GITHUB_SHA}"
+          docker build -t "$image" -f lightsail/Dockerfile .
+          docker save --output /tmp/lightsail-image.tar "$image"
+      - name: Upload validated Lightsail image
         uses: actions/upload-artifact@v4
         with:
-          name: lightsail-runtime
-          path: lightsail/runtime
+          name: lightsail-image
+          path: /tmp/lightsail-image.tar
           if-no-files-found: error
           retention-days: 1
 
@@ -54,11 +58,11 @@ jobs:
       DEPLOY_PATH: /home/ubuntu/agentic-football-event-ops
     steps:
       - uses: actions/checkout@v4
-      - name: Download validated Lightsail runtime
+      - name: Download validated Lightsail image
         uses: actions/download-artifact@v4
         with:
-          name: lightsail-runtime
-          path: lightsail/runtime
+          name: lightsail-image
+          path: deploy-artifacts
       - name: Upload validated source
         run: |
           rsync -az --delete \
@@ -70,8 +74,10 @@ jobs:
             --exclude 'lightsail/.aws/' \
             --exclude 'lightsail/.tls/' \
             --exclude 'lightsail/.acme/' \
+            --exclude 'lightsail/runtime/' \
+            --exclude 'deploy-artifacts/' \
             ./ "$DEPLOY_PATH/"
-      - name: Build candidate, verify health, and roll back on failure
+      - name: Load candidate, verify health, and roll back on failure
         run: |
           set -euo pipefail
           cd /home/ubuntu/agentic-football-event-ops
@@ -88,7 +94,8 @@ jobs:
           }
           trap rollback ERR
 
-          sudo docker build -t "$candidate_image" -f lightsail/Dockerfile .
+          sudo docker load --input "$GITHUB_WORKSPACE/deploy-artifacts/lightsail-image.tar"
+          sudo docker image inspect "$candidate_image" >/dev/null
           sudo env APP_IMAGE="$candidate_image" docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --no-deps --force-recreate app
 
           for attempt in $(seq 1 12); do
