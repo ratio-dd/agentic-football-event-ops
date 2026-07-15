@@ -51,11 +51,12 @@ jobs:
     name: Deploy feedback to Lightsail
     needs: test
     if: github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, feedback]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: feedback
     env:
-      DEPLOY_PATH: /home/ubuntu/agentic-football-event-ops
+      DEPLOY_HOST: ${{ vars.FEEDBACK_LIGHTSAIL_HOST }}
+      DEPLOY_KNOWN_HOSTS: ${{ vars.FEEDBACK_LIGHTSAIL_KNOWN_HOSTS }}
     steps:
       - uses: actions/checkout@v4
       - name: Download validated Lightsail image
@@ -63,51 +64,34 @@ jobs:
         with:
           name: lightsail-image
           path: deploy-artifacts
-      - name: Upload validated source
-        run: |
-          rsync -az --delete \
-            --exclude '.git/' \
-            --exclude 'node_modules/' \
-            --exclude '.env' \
-            --exclude '.dev.vars*' \
-            --exclude '.local-data/' \
-            --exclude 'lightsail/.aws/' \
-            --exclude 'lightsail/.tls/' \
-            --exclude 'lightsail/.acme/' \
-            --exclude 'lightsail/runtime/' \
-            --exclude 'deploy-artifacts/' \
-            ./ "$DEPLOY_PATH/"
-      - name: Load candidate, verify health, and roll back on failure
+      - name: Assemble restricted deployment archive
         run: |
           set -euo pipefail
-          cd /home/ubuntu/agentic-football-event-ops
-          compose=(sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml)
-          previous_image="$(sudo docker inspect --format '{{.Config.Image}}' agentic-football-feedback 2>/dev/null || true)"
-          candidate_image="agentic-football-event-ops:feedback-${GITHUB_SHA}"
-
-          rollback() {
-            echo "Candidate deployment failed; preserving diagnostics and restoring the previous app image."
-            sudo docker logs --tail 150 agentic-football-feedback || true
-            if [ -n "$previous_image" ]; then
-              sudo env APP_IMAGE="$previous_image" docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --no-deps --force-recreate app || true
-            fi
-          }
-          trap rollback ERR
-
-          sudo docker load --input "$GITHUB_WORKSPACE/deploy-artifacts/lightsail-image.tar"
-          sudo docker image inspect "$candidate_image" >/dev/null
-          sudo env APP_IMAGE="$candidate_image" docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --no-deps --force-recreate app
-
-          for attempt in $(seq 1 12); do
-            health="$(sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' agentic-football-feedback)"
-            if [ "$health" = healthy ]; then
-              break
-            fi
-            echo "Waiting for app health ($attempt/12): $health"
-            sleep 5
-          done
-
-          [ "$(sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' agentic-football-feedback)" = healthy ]
-          curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --insecure https://127.0.0.1/healthz
-          "${compose[@]}" ps
-          sudo docker tag "$candidate_image" agentic-football-event-ops:feedback
+          mkdir -p release/lightsail
+          cp deploy-artifacts/lightsail-image.tar release/lightsail-image.tar
+          cp lightsail/docker-compose.feedback-ip.yml release/lightsail/
+          cp lightsail/deploy-from-github.sh release/lightsail/
+          printf 'CANDIDATE_IMAGE=agentic-football-event-ops:feedback-%s\n' "$GITHUB_SHA" > release/manifest.env
+          tar -C release -czf deploy-artifacts/feedback-release.tar.gz .
+      - name: Configure restricted SSH client
+        run: |
+          set -euo pipefail
+          [ -n "$DEPLOY_HOST" ] || { echo "Missing repository variable FEEDBACK_LIGHTSAIL_HOST." >&2; exit 2; }
+          [ -n "$DEPLOY_KNOWN_HOSTS" ] || { echo "Missing repository variable FEEDBACK_LIGHTSAIL_KNOWN_HOSTS." >&2; exit 2; }
+          [ -n "${{ secrets.FEEDBACK_DEPLOY_SSH_PRIVATE_KEY }}" ] || { echo "Missing repository secret FEEDBACK_DEPLOY_SSH_PRIVATE_KEY." >&2; exit 2; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.FEEDBACK_DEPLOY_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/feedback_deploy"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/feedback_deploy" "$HOME/.ssh/known_hosts"
+      - name: Stream candidate to Lightsail and verify public health
+        run: |
+          set -euo pipefail
+          cat deploy-artifacts/feedback-release.tar.gz | ssh \
+            -i "$HOME/.ssh/feedback_deploy" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "ubuntu@$DEPLOY_HOST"
+          curl --fail --silent --show-error --connect-timeout 8 --max-time 15 --insecure \
+            "https://$DEPLOY_HOST/healthz"
