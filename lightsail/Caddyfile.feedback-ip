@@ -1,0 +1,15 @@
+:80 {
+  handle /.well-known/acme-challenge/* {
+    root * /srv/acme
+    file_server
+  }
+  handle {
+    redir https://{host}{uri} permanent
+  }
+}
+
+:443 {
+  tls /etc/letsencrypt/live/agentic-football-feedback-ip/fullchain.pem /etc/letsencrypt/live/agentic-football-feedback-ip/privkey.pem
+  encode zstd gzip
+  reverse_proxy app:8787
+}

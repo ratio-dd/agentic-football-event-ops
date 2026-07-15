@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: lightsail/Dockerfile
+    env_file: ${CONFIG_ENV_FILE:-.env}
+    volumes:
+      - feedback-event-data:/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - app
+    env_file: ${CONFIG_ENV_FILE:-.env}
+    volumes:
+      - ./Caddyfile.feedback:/etc/caddy/Caddyfile:ro
+      - feedback-caddy-data:/data
+      - feedback-caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  feedback-event-data:
+  feedback-caddy-data:
+  feedback-caddy-config:

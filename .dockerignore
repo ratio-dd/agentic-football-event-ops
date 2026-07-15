@@ -1,0 +1,13 @@
+node_modules
+dist
+.vinext
+.wrangler
+.local-data
+output
+outputs
+.git
+.dev.vars
+lightsail/.env
+lightsail/.tls
+lightsail/.acme
+tsconfig.tsbuildinfo

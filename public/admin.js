@@ -1,308 +1,57 @@
-/**
- * Desktop admin workspace for the Beijing MeetUp MVP.
- *
- * The server remains the source of truth.  Every mutation in this module is
- * deliberately sent to the API, then the surrounding app is asked to refresh
- * its state before the next render.
- */
+const e = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+const status = (team) => ({ draft: "编组中", ready_code: "待发 Code", issued: "Workshop 中", ta_qualified: "可参赛" }[team.status] || team.status);
+const members = (team) => `${e(team.teamNumber)} · ${team.members.map((m) => `${e(m.nickname)} · ${e(m.staffShortId)}`).join("、")}`;
 
-const ACTIONS = {
-  checkIn: (teamId) => `/api/admin/teams/${encodeURIComponent(teamId)}/check-in`,
-  seat: (teamId) => `/api/admin/teams/${encodeURIComponent(teamId)}/seat`,
-  lock: (teamId) => `/api/admin/teams/${encodeURIComponent(teamId)}/lock`,
-  eligibility: (teamId) => `/api/admin/teams/${encodeURIComponent(teamId)}/competition-approval`,
-  generateTournament: '/api/admin/tournament/generate',
-  result: (matchId) => `/api/admin/matches/${encodeURIComponent(matchId)}/result`,
-};
-
-const statusLabels = {
-  draft: '草稿',
-  waitlist: '候补',
-  waitlisted: '候补',
-  checked_in: '已签到',
-  confirmed: '已确认',
-  locked: '已锁队',
-  cancelled: '已取消',
-  workshop: 'Workshop 中',
-  workshop_complete: 'Workshop 完成',
-};
-
-function text(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-function count(value) {
-  return Array.isArray(value) ? value.length : Number(value || 0);
-}
-
-function teamMembers(team) {
-  return Array.isArray(team.members) ? team.members : [];
-}
-
-function teamName(team = {}) {
-  return team.name || team.teamName || `队伍 ${String(team.id || '').slice(0, 6)}`;
-}
-
-function leaderName(team) {
-  return team.leaderName || team.captainName || team.leader?.nickname || teamMembers(team).find((member) => member.isCaptain || member.isLeader || member.id === team.captainId)?.nickname || '未指定';
-}
-
-function seatLabel(team) {
-  const seat = team.seat || team.seatAssignment || {};
-  return team.tableLabel || seat.label || seat.tableName || seat.table?.label || seat.table?.name || team.table?.label || team.table?.name || team.tableName || team.seatId || '未分配';
-}
-
-function isCheckedIn(team) {
-  return Boolean(team.checkedIn || team.checkedInAt || ['checked_in', 'confirmed', 'locked', 'workshop', 'workshop_complete'].includes(team.status));
-}
-
-function isLocked(team) {
-  return Boolean(team.locked || team.lockedAt || ['locked', 'workshop', 'workshop_complete'].includes(team.status));
-}
-
-function eligible(team) {
-  return Boolean(team.competitionApproved ?? team.competitionEligible ?? team.eligibleForCompetition ?? team.competition?.eligible);
-}
-
-function matchesFrom(state) {
-  const tournament = state.tournament || {};
-  return tournament.matches || state.matches || tournament.fixtures || [];
-}
-
-function tablesFrom(state) {
-  return state.tables || state.seatTables || state.seating?.tables || [];
-}
-
-function templatesFrom(state) {
-  const configured = state.tournamentTemplates || state.tournament?.templates;
-  return Array.isArray(configured) && configured.length ? configured : [
-    { id: 'groups-top2-knockout', name: '小组赛前二晋级淘汰赛' },
-    { id: 'single-elimination', name: '单败淘汰赛' },
-  ];
-}
-
-function logFrom(state) {
-  return state.activityLog || state.auditLog || state.activities || [];
-}
-
-function formatTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? text(value) : new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' }).format(date);
-}
-
-function errorMessage(error) {
-  return error?.message || error?.error || '操作失败，请检查网络或当前队伍状态。';
-}
-
-async function adminCall(api, operation, args, method, path, body) {
-  if (typeof api?.[operation] === 'function') return api[operation](...args);
-  return request(api, method, path, body);
-}
-
-async function request(api, method, path, body) {
-  // Keep the same small client shape used by participant.js: request(path,
-  // { method, body }).  app.js owns auth/header injection in normal use.
-  if (typeof api?.request === 'function') return api.request(path, { method, body });
-  if (typeof api?.[method.toLowerCase()] === 'function') return api[method.toLowerCase()](path, body);
-  if (typeof api === 'function') return api({ method, path, body });
-  const response = await fetch(path, {
-    method,
-    headers: { 'Content-Type': 'application/json', 'x-admin-token': 'meetup-admin' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+export function renderStaff(root, state, api, controls) {
+  stopScanner(controls.ui);
+  if (!state.staffSession && !state.participants) return loginView(root, controls);
+  const tab = controls.ui.tab || "overview"; const teams = state.teams || []; const qualified = teams.filter((t) => t.qualificationStatus === "ta_qualified").length;
+  const content = { overview: overview(state, teams, qualified), grouping: grouping(state, controls.ui), codes: codeTab(state, teams), ta: taTab(state, teams, controls.ui), competition: competition(state, teams, controls.ui), audit: auditTab(state.auditLog || [], controls.ui) }[tab];
+  root.innerHTML = `<div class="staff-shell"><header class="staff-top"><div><strong>⚽ 现场运营台</strong><small>${e(state.event?.name || "北京 MeetUp")}</small></div><button class="text-button" data-action="logout">退出</button></header><p class="notice" aria-live="polite"></p><main>${content}</main><nav class="bottom-tabs"><button data-tab="overview" class="${tab === "overview" ? "active" : ""}">总览</button><button data-tab="grouping" class="${tab === "grouping" ? "active" : ""}">组队</button><button data-tab="codes" class="${tab === "codes" ? "active" : ""}">Code</button><button data-tab="ta" class="${tab === "ta" ? "active" : ""}">TA</button><button data-tab="competition" class="${tab === "competition" ? "active" : ""}">比赛</button><button data-tab="audit" class="${tab === "audit" ? "active" : ""}">记录</button></nav></div>`;
+  const notice = root.querySelector(".notice"); const action = async (fn, ok) => { try { await fn(); await controls.refresh(); const refreshedNotice = document.querySelector(".notice"); if (refreshedNotice) refreshedNotice.textContent = ok; } catch (error) { notice.textContent = error.message; } };
+  root.addEventListener("click", (event) => {
+    const button = event.target.closest("button"); if (!button) return;
+    if (button.dataset.tab) { controls.ui.tab = button.dataset.tab; renderStaff(root, state, api, controls); return; }
+    if (button.dataset.action === "logout") return controls.logout();
+    if (button.dataset.action === "scan") return startScanner(root, state, controls, api, notice);
+    if (button.dataset.filter) { controls.ui.taFilter = button.dataset.filter; return renderStaff(root, state, api, controls); }
+    if (button.dataset.auditFilter) { controls.ui.auditFilter = button.dataset.auditFilter; return renderStaff(root, state, api, controls); }
+    if (button.dataset.action === "confirm-team") return action(() => api.confirmTeam(button.dataset.teamId), "队伍已确认，可发放 Code。");
+    if (button.dataset.action === "edit-team") { controls.ui.editingTeamId = button.dataset.teamId; controls.ui.selectedMemberIds = state.teams.find((team) => team.id === button.dataset.teamId)?.memberIds || []; return renderStaff(root, state, api, controls); }
+    if (button.dataset.action === "cancel-edit") { controls.ui.editingTeamId = null; controls.ui.selectedMemberIds = []; return renderStaff(root, state, api, controls); }
+    if (button.dataset.action === "remove-team" && window.confirm("确认解散这支未发码队伍吗？成员会回到待分组池。")) return action(() => api.removeTeam(button.dataset.teamId), "队伍已解散。");
+    if (button.dataset.action === "workshop") return action(() => api.workshopStatus(button.dataset.teamId, "in_progress"), "已标记为 Workshop 中。");
+    if (button.dataset.action === "blocked") { const note = window.prompt("记录需要 TA 协助的原因（可留空）", "") ?? ""; return action(() => api.workshopStatus(button.dataset.teamId, "blocked", note), "已标记需要协助。"); }
+    if (button.dataset.action === "qualify" && window.confirm("已在 Game Portal 确认该队完成练习赛吗？")) return action(() => api.qualify(button.dataset.teamId), "该队已加入下午比赛池。");
+    if (button.dataset.action === "revoke" && window.confirm("确认撤销该队的参赛资格？赛程生成后不可直接撤销。")) { const note = window.prompt("撤销原因（可留空）", "") ?? ""; return action(() => api.revokeQualification(button.dataset.teamId, note, window.prompt("管理员 PIN（部署环境必填）", "") ?? ""), "已撤销参赛资格。"); }
+    if (button.dataset.action === "void" && window.confirm("确认作废当前赛程并重新开始分组吗？")) return action(() => api.voidTournament(window.prompt("作废原因（可留空）", "") ?? "", window.prompt("管理员 PIN（部署环境必填）", "") ?? ""), "赛程已作废。");
   });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || result.message || '操作失败，请检查网络或当前队伍状态。');
-  return result;
+  root.querySelector("#group-search")?.addEventListener("input", async (event) => { const query = event.target.value.trim(); controls.ui.groupQuery = query; if (!query) return renderSearch(root, [], controls.ui); try { const result = await api.searchParticipants(query); controls.ui.searchResults = result.participants || []; renderSearch(root, controls.ui.searchResults, controls.ui); } catch (error) { notice.textContent = error.message; } });
+  root.addEventListener("change", (event) => { if (event.target.matches("[data-member]")) { const selected = new Set(controls.ui.selectedMemberIds || []); event.target.checked ? selected.add(event.target.value) : selected.delete(event.target.value); controls.ui.selectedMemberIds = [...selected].slice(0, 3); const count = root.querySelector("[data-member-count]"); if (count) count.textContent = `${controls.ui.selectedMemberIds.length} / 3`; } });
+  root.querySelector("#save-team")?.addEventListener("click", () => { const selected = controls.ui.selectedMemberIds || []; const editing = controls.ui.editingTeamId; return action(() => editing ? api.updateTeam(editing, selected) : api.createTeam(selected), editing ? "队伍成员已调整。" : "已创建临时队伍。").then(() => { controls.ui.editingTeamId = null; controls.ui.selectedMemberIds = []; controls.ui.searchResults = []; }); });
+  root.querySelector("#code-import")?.addEventListener("submit", (event) => { event.preventDefault(); const codes = String(new FormData(event.target).get("codes") || "").split(/\r?\n/).map((code) => code.trim()).filter(Boolean); action(() => api.importWorkshopCodes(codes), `已导入 ${codes.length} 个官方 Code。`); });
+  root.querySelector("#workshop-link")?.addEventListener("submit", (event) => { event.preventDefault(); const url = new FormData(event.target).get("url"); action(() => api.setWorkshopLink(url), "Workshop 链接已保存。"); });
+  root.querySelector("#event-gates")?.addEventListener("submit", (event) => { event.preventDefault(); const form = new FormData(event.target); const gates = { selfServiceTeam: form.has("selfServiceTeam"), codeIssuance: form.has("codeIssuance"), qualification: form.has("qualification"), scheduleEditing: form.has("scheduleEditing") }; if (window.confirm("确认更新现场开关吗？关闭后对应入口会立刻停止。")) action(() => api.updateEventGates(gates, form.get("adminPin")), "现场开关已更新。"); });
+  root.querySelector("#code-assign")?.addEventListener("submit", (event) => { event.preventDefault(); const teamId = new FormData(event.target).get("teamId"); if (window.confirm("确认后，系统将自动发放下一个可用 Code，且不能撤回。")) action(() => api.issueCode(teamId), "已自动发放下一个可用 Code。"); });
+  root.querySelector("#freeze-roster")?.addEventListener("submit", (event) => { event.preventDefault(); const teamIds = [...new FormData(event.target).getAll("teamId")]; if (window.confirm(`确认冻结 ${teamIds.length} 支参赛队伍吗？`)) action(() => api.freezeCompetition(teamIds, new FormData(event.target).get("adminPin")), "比赛名单已冻结。"); });
+  root.querySelector("#generate-groups")?.addEventListener("submit", (event) => { event.preventDefault(); const form = new FormData(event.target); action(() => api.tournament(Number(form.get("groupCount")), Number(form.get("qualifiersPerGroup")), form.get("adminPin")), "小组赛赛程已生成。"); });
+  root.querySelector("#swap-groups")?.addEventListener("submit", (event) => { event.preventDefault(); const form = new FormData(event.target); if (window.confirm("确认交换两队的小组位置吗？尚未录入的全部小组赛对阵会按新分组重新生成。")) action(() => api.swapTournamentTeams(form.get("firstTeamId"), form.get("secondTeamId"), form.get("adminPin")), "分组已调整，赛程已同步更新。"); });
+  root.querySelector("#generate-knockout")?.addEventListener("submit", (event) => { event.preventDefault(); const form = new FormData(event.target); action(() => api.generateKnockout(form.get("adminPin")), "淘汰赛对阵已生成。"); });
+  root.querySelectorAll(".score-form").forEach((form) => form.addEventListener("submit", (event) => { event.preventDefault(); const data = new FormData(form); action(() => api.result(data.get("matchId"), data.get("scoreA"), data.get("scoreB"), data.get("adminPin")), "赛果已保存。"); }));
 }
 
-async function refresh(api, onStateChange) {
-  let nextState;
-  if (typeof api?.refresh === 'function') nextState = await api.refresh();
-  else if (typeof api?.getState === 'function') nextState = await api.getState();
-  else if (typeof api?.request === 'function') nextState = await api.request('/api/state', { method: 'GET' });
-  else nextState = await request(null, 'GET', '/api/state');
-  if (typeof onStateChange === 'function') onStateChange(nextState);
-  return nextState;
-}
-
-function summary(state, teams) {
-  const max = state.event?.maxWorkshopTeams || state.maxWorkshopTeams || 32;
-  const checkedIn = teams.filter(isCheckedIn).length;
-  const locked = teams.filter(isLocked).length;
-  const waitlist = teams.filter((team) => team.status === 'waitlist' || team.status === 'waitlisted' || team.waitlisted).length;
-  const eligibleTeams = teams.filter(eligible).length;
-  const capacity = tablesFrom(state).reduce((total, table) => total + Number(table.capacity ?? table.totalCapacity ?? 0), 0);
-  const usedSeats = tablesFrom(state).reduce((total, table) => total + Number(table.used ?? table.usedCapacity ?? table.occupiedSeats ?? 0), 0);
-  const items = [
-    ['签到占位', `${checkedIn} / ${max}`],
-    ['已锁队', locked],
-    ['候补', waitlist],
-    ['比赛候选', eligibleTeams],
-    ['桌位余量', capacity ? Math.max(0, capacity - usedSeats) : '待配置'],
-  ];
-  return `<section class="admin-summary" aria-label="活动总览">${items.map(([label, value]) => `<article class="admin-metric"><span>${text(label)}</span><strong>${text(value)}</strong></article>`).join('')}</section>`;
-}
-
-function teamTable(teams, selectedId) {
-  const rows = teams.map((team) => {
-    const size = team.memberCount ?? count(teamMembers(team));
-    return `<tr data-team-row="${text(team.id)}" class="${team.id === selectedId ? 'is-selected' : ''}">
-      <td><button type="button" class="link-button" data-action="select-team" data-team-id="${text(team.id)}">${text(teamName(team))}</button><small>${text(team.id || '')}</small></td>
-      <td>${text(leaderName(team))}<br><small>${text(size)} 人</small></td>
-      <td>${text(statusLabels[team.status] || team.status || '草稿')}</td>
-      <td>${isCheckedIn(team) ? '已签到' : '未签到'}</td>
-      <td>${text(seatLabel(team))}</td>
-      <td>${eligible(team) ? '<span class="pill pill-positive">已确认</span>' : '<span class="pill">未确认</span>'}</td>
-    </tr>`;
-  }).join('');
-  return `<section class="admin-panel admin-team-list"><div class="panel-heading"><div><p class="eyebrow">现场运营</p><h2>队伍与名额</h2></div><span>${teams.length} 支队伍</span></div>
-    <div class="table-scroll"><table><thead><tr><th>队伍</th><th>队长 / 人数</th><th>状态</th><th>签到</th><th>桌位</th><th>比赛资格</th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="empty">暂时没有队伍</td></tr>'}</tbody></table></div></section>`;
-}
-
-function inspector(team, tables) {
-  if (!team) return `<aside class="admin-panel admin-inspector"><p class="eyebrow">队伍检查器</p><h2>选择一支队伍</h2><p class="muted">从左侧队伍列表选择后，可完成签到、配桌、锁队、发放 Team Code 与比赛资格确认。</p></aside>`;
-  const members = teamMembers(team).map((member) => `<li>${text(member.nickname || member.name || member.id)}${member.isCaptain || member.isLeader ? ' <span class="pill">队长</span>' : ''}</li>`).join('') || `<li class="muted">成员信息待补充</li>`;
-  const tableOptions = tables.map((table) => {
-    const label = table.label || table.name || table.id;
-    const remaining = table.remaining ?? table.availableSeats ?? Math.max(0, Number(table.capacity ?? 0) - Number(table.used ?? table.occupiedSeats ?? 0));
-    const current = table.id === (team.seat?.tableId || team.seatAssignment?.tableId || team.tableId);
-    return `<option value="${text(table.id)}" ${current ? 'selected' : ''}>${text(label)}（余 ${text(remaining)}）</option>`;
-  }).join('');
-  const code = team.teamCode || team.code?.value;
-  return `<aside class="admin-panel admin-inspector" data-selected-team="${text(team.id)}">
-    <div class="panel-heading"><div><p class="eyebrow">队伍检查器</p><h2>${text(teamName(team))}</h2></div><span class="pill">${text(statusLabels[team.status] || team.status || '草稿')}</span></div>
-    <dl class="team-facts"><div><dt>队长</dt><dd>${text(leaderName(team))}</dd></div><div><dt>成员</dt><dd><ul>${members}</ul></dd></div><div><dt>签到 / 桌位</dt><dd>${isCheckedIn(team) ? '已签到' : '未签到'} · ${text(seatLabel(team))}</dd></div><div><dt>Team Code</dt><dd>${code ? `<code>${text(code)}</code>` : '尚未发放'}</dd></div></dl>
-    <div class="admin-actions">
-      <button type="button" data-action="check-in" data-team-id="${text(team.id)}" ${isCheckedIn(team) ? 'disabled' : ''}>确认签到并占位</button>
-      <form data-form="seat" data-team-id="${text(team.id)}"><label>分配桌位<select name="tableId" ${isLocked(team) ? 'disabled' : ''}><option value="">请选择桌位</option>${tableOptions}</select></label><button type="submit" ${isLocked(team) ? 'disabled' : ''}>保存配桌</button></form>
-      <button type="button" data-action="lock-team" data-team-id="${text(team.id)}" ${isLocked(team) ? 'disabled' : ''}>锁队并发放 Team Code</button>
-      <hr>
-      <p class="helper">仅在该队已实际完成 workshop 基础部署、并由管理员二次人工确认后，授予比赛资格。这里不采集或展示 workshop 注册进度、账号或凭据。</p>
-      <button type="button" data-action="toggle-eligibility" data-team-id="${text(team.id)}" data-eligible="${eligible(team) ? 'false' : 'true'}">${eligible(team) ? '撤销比赛资格' : '人工确认比赛资格'}</button>
-    </div>
-  </aside>`;
-}
-
-function tournament(state) {
-  const tournamentState = state.tournament || {};
-  const templates = templatesFrom(state);
-  const selected = tournamentState.templateId || state.selectedTemplateId || '';
-  const templateOptions = templates.map((template) => `<option value="${text(template.id)}" ${template.id === selected ? 'selected' : ''}>${text(template.name || template.label || template.id)}${template.teamRange ? ` · ${text(template.teamRange)}` : ''}</option>`).join('');
-  const teamById = new Map((state.teams || []).map((team) => [team.id, team]));
-  const matchRows = matchesFrom(state).map((match) => {
-    const home = match.homeTeamName || match.homeTeam?.name || match.home?.name || (match.teamAId ? teamName(teamById.get(match.teamAId)) : '待定');
-    const away = match.awayTeamName || match.awayTeam?.name || match.away?.name || (match.teamBId ? teamName(teamById.get(match.teamBId)) : '待定');
-    const homeScore = match.homeScore ?? match.scoreA ?? match.score?.home ?? '';
-    const awayScore = match.awayScore ?? match.scoreB ?? match.score?.away ?? '';
-    const confirmed = ['confirmed', 'completed'].includes(match.status) || ['confirmed', 'completed'].includes(match.resultStatus);
-    const ready = !match.status || match.status === 'ready';
-    return `<tr><td>${text(match.label || match.round || match.stage || '—')}<br><small>${text(match.group || match.groupId || '')}</small></td><td>${text(home)} <b>vs</b> ${text(away)}</td><td>${formatTime(match.scheduledAt || match.startTime || match.time)}</td><td><form class="score-form" data-form="result" data-match-id="${text(match.id)}"><input aria-label="${text(home)} 得分" name="homeScore" type="number" min="0" value="${text(homeScore)}" required><span>:</span><input aria-label="${text(away)} 得分" name="awayScore" type="number" min="0" value="${text(awayScore)}" required><button type="submit" ${confirmed || !ready ? 'disabled' : ''}>${confirmed ? '已确认' : ready ? '确认赛果' : '等待上轮'}</button></form></td></tr>`;
-  }).join('');
-  return `<section class="admin-panel admin-tournament"><div class="panel-heading"><div><p class="eyebrow">赛事控制台</p><h2>实际达标队伍赛程</h2></div><span>${matchesFrom(state).length} 场</span></div>
-    <p class="helper">仅已由管理员人工确认比赛资格的队伍会进入赛程候选池。选择模板并生成后，不会静默重排既有赛程。</p>
-    <form class="tournament-controls" data-form="tournament"><label>赛制模板<select name="templateId"><option value="">请选择模板</option>${templateOptions}</select></label><button type="submit" ${matchesFrom(state).length ? 'disabled' : ''}>按此模板生成赛程</button></form>
-    <div class="table-scroll"><table><thead><tr><th>轮次</th><th>对阵</th><th>时间</th><th>赛果</th></tr></thead><tbody>${matchRows || '<tr><td colspan="4" class="empty">尚未生成赛程</td></tr>'}</tbody></table></div>
-  </section>`;
-}
-
-function activityLog(state) {
-  const entries = logFrom(state).slice(0, 12).map((entry) => `<li><time>${formatTime(entry.createdAt || entry.at || entry.time)}</time><div><strong>${text(entry.actionLabel || entry.action || '管理员操作')}</strong><p>${text(entry.summary || entry.message || entry.reason || entry.note || '')}</p><small>${text(entry.actorName || entry.actor || '管理员')}</small></div></li>`).join('');
-  return `<section class="admin-panel admin-activity"><div class="panel-heading"><div><p class="eyebrow">审计记录</p><h2>最近操作</h2></div></div><ol>${entries || '<li class="empty">暂无操作记录</li>'}</ol></section>`;
-}
-
-/**
- * Render the administrator workspace.
- * @param {HTMLElement} root
- * @param {object} state Current server state.
- * @param {object|Function} api API client supplied by app.js.
- * @param {(nextState?: object) => void} onStateChange asks app.js to refresh/re-render.
- */
-export function renderAdmin(root, state = {}, api, onStateChange) {
-  const teams = state.teams || [];
-  const tables = tablesFrom(state);
-  const selectedId = root.dataset.selectedTeamId || teams[0]?.id || '';
-  const selectedTeam = teams.find((team) => String(team.id) === String(selectedId)) || teams[0];
-
-  root.innerHTML = `<div class="admin-shell"><aside class="admin-nav" aria-label="管理导航"><div class="admin-nav-brand"><span aria-hidden="true">⚽</span><strong>Agentic Football</strong></div><a href="#overview">活动总览</a><a class="active" href="#teams">队伍管理</a><a href="#teams">签到与名额</a><a href="#teams">配桌与换座</a><a href="#teams">Team Code</a><a href="#tournament">比赛与赛程</a><a href="#activity">操作记录</a></aside><main class="admin-workspace"><header class="admin-header" id="overview"><div><p class="eyebrow">北京 MeetUp · 管理后台</p><h1>${text(state.event?.name || '组队、Workshop 与赛事运营')}</h1><p>现场签到、锁队、配桌和赛程管理。Team Code 仅作为队长自行注册 workshop 的区分码，系统不代办注册或保留凭据。</p></div><button type="button" data-action="refresh">刷新数据</button></header>
-    <p class="admin-notice" aria-live="polite" hidden></p>
-    ${summary(state, teams)}
-    <section class="admin-operations-grid" id="teams">${teamTable(teams, selectedTeam?.id)}${inspector(selectedTeam, tables)}</section>
-    <div id="tournament">${tournament(state)}</div>
-    <div id="activity">${activityLog(state)}</div>
-  </main></div>`;
-
-  const notice = root.querySelector('.admin-notice');
-  const showNotice = (message, kind = 'success') => {
-    notice.textContent = message;
-    notice.hidden = false;
-    notice.dataset.kind = kind;
-  };
-  const mutate = async (call, message) => {
-    root.setAttribute('aria-busy', 'true');
-    try {
-      await call();
-      const nextState = await refresh(api, onStateChange);
-      showNotice(message);
-      return nextState;
-    } catch (error) {
-      showNotice(errorMessage(error), 'error');
-      return undefined;
-    } finally {
-      root.removeAttribute('aria-busy');
-    }
-  };
-
-  root.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-action]');
-    if (!button || button.disabled) return;
-    const { action, teamId } = button.dataset;
-    if (action === 'select-team') {
-      root.dataset.selectedTeamId = teamId;
-      renderAdmin(root, state, api, onStateChange);
-      return;
-    }
-    if (action === 'refresh') {
-      await refresh(api, onStateChange);
-      showNotice('已请求最新活动数据。');
-      return;
-    }
-    if (action === 'check-in') await mutate(() => adminCall(api, 'adminCheckIn', [teamId], 'POST', ACTIONS.checkIn(teamId), {}), '已确认签到；系统已按当前名额规则处理占位或候补。');
-    if (action === 'lock-team') await mutate(() => adminCall(api, 'adminLock', [teamId], 'POST', ACTIONS.lock(teamId), {}), '队伍已锁定，Team Code 已发放。');
-    if (action === 'toggle-eligibility') {
-      const shouldApprove = button.dataset.eligible === 'true';
-      const confirmation = shouldApprove
-        ? '请确认：该队已经实际完成 workshop 基础部署，管理员现在进行二次人工确认并授予比赛资格。'
-        : '请确认：撤销该队的比赛资格。已生成赛程不会被静默重排。';
-      if (window.confirm(confirmation)) await mutate(() => adminCall(api, 'adminCompetitionApproval', [teamId, shouldApprove], 'POST', ACTIONS.eligibility(teamId), { approved: shouldApprove }), shouldApprove ? '已人工确认比赛资格。' : '已撤销比赛资格。');
-    }
-  });
-
-  root.addEventListener('submit', async (event) => {
-    const form = event.target.closest('form');
-    if (!form) return;
-    event.preventDefault();
-    const data = new FormData(form);
-    if (form.dataset.form === 'seat') {
-      const tableId = data.get('tableId');
-      if (!tableId) return showNotice('请先选择桌位。', 'error');
-      await mutate(() => adminCall(api, 'adminSeat', [form.dataset.teamId, tableId], 'POST', ACTIONS.seat(form.dataset.teamId), { seatId: tableId }), '桌位已分配。');
-    }
-    if (form.dataset.form === 'tournament') {
-      const templateId = data.get('templateId');
-      if (!templateId) return showNotice('请选择赛制模板。', 'error');
-      if (window.confirm('将以当前已人工确认比赛资格的队伍生成赛程，确认继续？')) await mutate(() => adminCall(api, 'generateTournament', [templateId], 'POST', ACTIONS.generateTournament, { templateId }), '赛程已生成。');
-    }
-    if (form.dataset.form === 'result') {
-      const homeScore = Number(data.get('homeScore'));
-      const awayScore = Number(data.get('awayScore'));
-      if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore) || homeScore < 0 || awayScore < 0) return showNotice('请填写有效的非负整数赛果。', 'error');
-      if (window.confirm('确认赛果后，系统可能推进下一轮对阵。确认继续？')) await mutate(() => adminCall(api, 'recordResult', [form.dataset.matchId, homeScore, awayScore], 'POST', ACTIONS.result(form.dataset.matchId), { homeScore, awayScore }), '赛果已确认，并已请求更新晋级对阵。');
-    }
-  });
-}
+function loginView(root, controls) { root.innerHTML = `<div class="mobile-shell"><header class="topbar"><strong>⚽ Agentic Football</strong><a href="/">参与者入口</a></header><section class="card"><p class="eyebrow">Staff 工作台</p><h1>进入现场运营台</h1><p>输入现场共享 PIN，并留下一个工作人员昵称用于审计。</p><form id="staff-login" class="stack"><label>Staff PIN<input name="staffPin" type="password" required></label><label>你的昵称<input name="staffNickname" maxlength="24" required placeholder="例如：小王 TA"></label><button>进入工作台</button></form><p class="hint">共享部署必须先配置 Staff PIN；默认 PIN 仅允许本地开发地址使用。</p></section></div>`; root.querySelector("#staff-login").addEventListener("submit", async (event) => { event.preventDefault(); const form = new FormData(event.target); try { await controls.login({ staffPin: form.get("staffPin"), staffNickname: form.get("staffNickname") }); } catch (error) { window.alert(error.message); } }); }
+function gateRow(name, label, checked, hint) { return `<label class="check-row"><input name="${name}" type="checkbox" ${checked ? "checked" : ""}><span><strong>${label}</strong><small>${hint}</small></span></label>`; }
+function overview(state, teams, qualified) { const available = state.codeSummary?.available || 0; const gates = state.event?.gates || {}; return `<section class="page-heading"><p class="eyebrow">总览</p><h1>下一步一眼可见</h1><p>同一工作人员可在底部切换组队、发码、TA 与比赛。</p></section><section class="metric-grid"><article><span>已登记</span><strong>${state.participants.length}</strong></article><article><span>待分组</span><strong>${state.participants.filter((p) => !p.teamId).length}</strong></article><article><span>待发 Code</span><strong>${teams.filter((t) => t.status === "ready_code").length}</strong></article><article><span>可用 Code</span><strong>${available}</strong></article><article><span>可参赛</span><strong>${qualified}</strong></article></section><section class="card"><h2>现场建议</h2><p>${!state.codeSummary?.total ? "先在 Code Tab 导入 AWS 提供的真实 Code。" : !available ? "可用 Code 已用完；请在 Staff 端安排后续队伍。" : teams.some((t) => t.status === "ready_code") ? "有队伍等待领取 Code，前往 Code Tab。" : "先完成到场人员的现场编组。"}</p>${state.tournament ? '<a class="display-link" href="/display" target="_blank" rel="noreferrer">打开现场大屏</a>' : ""}</section><form id="event-gates" class="card stack"><h2>现场开关</h2><p class="hint">用于按时间点收口。关闭后对应操作立即不可用；管理员可因现场例外重新开启。</p>${gateRow("selfServiceTeam", "允许自助组队", gates.selfServiceTeam !== false, "关闭后，选手只能找工作人员编组")}${gateRow("codeIssuance", "允许发放 Code", gates.codeIssuance !== false, "关闭后，不再向新队伍发放资源")}${gateRow("qualification", "允许确认参赛资格", gates.qualification !== false, "关闭后，TA 不能再增删下午比赛队伍")}${gateRow("scheduleEditing", "允许调整名单与赛程", gates.scheduleEditing !== false, "关闭后，不能冻结、重分组、交换或作废赛程")}<label>管理员 PIN（部署环境必填）<input name="adminPin" type="password"></label><button>保存现场开关</button></form>`; }
+function grouping(state, ui) { const editing = state.teams.find((team) => team.id === ui.editingTeamId); const selected = (ui.selectedMemberIds || []).length; return `<section class="page-heading"><p class="eyebrow">人员与组队</p><h1>${editing ? `调整 ${e(editing.teamNumber)}` : "参与者可自助，Staff 负责调剂"}</h1><p>输入昵称、<code>001</code> 或 <code>P-001</code> 找人；选手出示个人二维码时也可直接扫码。</p></section><section class="card search-picker"><div class="button-row"><button type="button" data-action="scan" class="secondary">扫码找人</button>${editing ? '<button type="button" data-action="cancel-edit" class="secondary">取消调整</button>' : ""}</div><label>找人<input id="group-search" autocomplete="off" placeholder="输入昵称、001 或 P-001" value="${e(ui.groupQuery || "")}"></label><div id="scanner" class="scanner"></div><div id="search-results" class="search-results">${searchRows(ui.searchResults || [], ui)}</div><div class="selection-bar"><strong>当前正在编组 <span data-member-count>${selected} / 3</span></strong><button id="save-team">${editing ? "保存调整" : "确认组成一队"}</button></div></section><section class="card"><h2>已编组队伍</h2><div class="compact-list">${state.teams.filter((team) => !team.codeIssuedAt).map((team) => `<article><div><strong>${members(team)}</strong><small>${status(team)}</small></div><div>${team.status === "draft" ? `<button data-action="confirm-team" data-team-id="${e(team.id)}">确认队伍</button><button data-action="edit-team" data-team-id="${e(team.id)}" class="secondary">调整</button><button data-action="remove-team" data-team-id="${e(team.id)}" class="secondary">解散</button>` : ""}</div></article>`).join("") || "暂无"}</div></section>`; }
+function searchRows(people, ui) { return people.map((p) => { const editable = !p.teamId || p.teamId === ui.editingTeamId; return `<label class="search-row"><span><strong>${e(p.nickname)}</strong><small>${e(p.staffShortId)} · ${p.teamId ? "已有队" : "可编组"}</small></span><input type="checkbox" data-member value="${e(p.id)}" ${(ui.selectedMemberIds || []).includes(p.id) ? "checked" : ""} ${editable ? "" : "disabled"}></label>`; }).join("") || "<p class=\"hint\">选中成员后确认组成一队。</p>"; }
+function renderSearch(root, people, ui) { root.querySelector("#search-results").innerHTML = searchRows(people, ui); }
+function codeTab(state, teams) { const ready = teams.filter((team) => !team.codeIssuedAt && ["draft", "ready_code"].includes(team.status)); const issued = teams.filter((team) => team.codeIssuedAt); const summary = state.codeSummary || { total: 0, available: 0, issued: 0 }; const open = state.event?.gates?.codeIssuance !== false; return `<section class="page-heading"><p class="eyebrow">Workshop Code</p><h1>自动取码，逐队发放</h1><p>AWS 提供的真实 Code 分开保存。工作人员只确认队伍；系统自动取下一个可用 Code。</p></section><section class="card"><h2>Workshop 链接</h2><form id="workshop-link" class="stack"><label>活动统一链接<input name="url" type="url" value="${e(state.event.workshopUrl)}" placeholder="https://…"></label><button>保存链接</button></form><p class="hint">发码后的队伍会看到“进入 Workshop”和“复制链接”。</p></section><section class="card"><h2>导入官方 Code</h2><form id="code-import" class="stack"><label>每行一个 Code<textarea name="codes" rows="4" placeholder="粘贴 AWS 老师提供的 32 个真实 Code"></textarea></label><button ${summary.issued ? "disabled" : ""}>批量导入</button></form><p class="hint">已导入 ${summary.total} 个 · 可用 ${summary.available} 个 · 已发放 ${summary.issued} 个</p></section><section class="card"><h2>发放给队伍</h2><form id="code-assign" class="stack"><label>队伍<select name="teamId">${ready.map((team) => `<option value="${e(team.id)}">${members(team)}</option>`).join("")}</select></label><button ${!open || !ready.length || !summary.available ? "disabled" : ""}>自动发放下一个可用 Code</button></form>${open ? "" : '<p class="hint">现场开关已关闭 Code 发放。</p>'}</section><section class="card"><h2>发放记录</h2><ul class="plain-list">${issued.map((team) => `<li>${members(team)} · 已发放</li>`).join("") || "暂无"}</ul></section>`; }
+function taTab(state, teams, ui) { const filter = ui.taFilter || "all"; const shown = teams.filter((team) => team.codeIssuedAt && (filter === "all" || (filter === "ta_qualified" ? team.qualificationStatus === "ta_qualified" : team.workshopStatus === filter))); const open = state.event?.gates?.qualification !== false; return `<section class="page-heading"><p class="eyebrow">Workshop / TA</p><h1>练习赛跑完，即可确认</h1><p>TA 在 Game Portal 核验练习赛记录后，一键将队伍加入下午比赛池。</p></section><section class="filter-row"><button data-filter="all" class="${filter === "all" ? "active" : ""}">全部</button><button data-filter="in_progress" class="${filter === "in_progress" ? "active" : ""}">进行中</button><button data-filter="blocked" class="${filter === "blocked" ? "active" : ""}">需协助</button><button data-filter="ta_qualified" class="${filter === "ta_qualified" ? "active" : ""}">已参赛</button></section>${open ? "" : '<p class="notice">下午比赛资格已停止确认。</p>'}<section class="compact-list card">${shown.map((team) => `<article><div><strong>${members(team)}</strong><small>${status(team)}${team.workshopNote ? ` · ${e(team.workshopNote)}` : ""}</small></div><div>${team.qualificationStatus === "ta_qualified" ? `<span class="pill">已确认</span><button data-action="revoke" data-team-id="${e(team.id)}" class="secondary" ${open ? "" : "disabled"}>撤销</button>` : `<button data-action="workshop" data-team-id="${e(team.id)}">Workshop 中</button><button data-action="blocked" data-team-id="${e(team.id)}" class="secondary">需要协助</button><button data-action="qualify" data-team-id="${e(team.id)}" ${open ? "" : "disabled"}>确认可参赛</button>`}</div></article>`).join("") || "暂无"}</section>`; }
+function competition(state, teams) { const eligible = teams.filter((team) => team.qualificationStatus === "ta_qualified"); const frozen = state.competition?.frozenTeamIds || []; const tournament = state.tournament; const open = state.event?.gates?.scheduleEditing !== false; const closed = open ? "" : '<p class="notice">现场开关已锁定名单和赛程；赛果仍可继续录入。</p>'; if (!frozen.length && !tournament) return `<section class="page-heading"><p class="eyebrow">比赛</p><h1>先冻结参赛名单</h1><p>只有 TA 已确认的队伍可以进入下午比赛。</p></section>${closed}<form id="freeze-roster" class="stack card">${eligible.map((team) => `<label class="check-row"><input type="checkbox" name="teamId" value="${e(team.id)}" checked>${members(team)}</label>`).join("") || "暂无资格队"}<label>管理员 PIN（部署环境必填）<input name="adminPin" type="password"></label><button ${!open || eligible.length < 2 ? "disabled" : ""}>冻结名单</button></form>`; if (frozen.length && !tournament) return `<section class="page-heading"><p class="eyebrow">比赛</p><h1>已冻结 ${frozen.length} 支队伍</h1><p>配置小组数和每组晋级名额后生成赛程。</p></section>${closed}<form id="generate-groups" class="stack card"><label>小组数量<input name="groupCount" type="number" min="1" max="8" value="${Math.ceil(frozen.length / 4)}"></label><label>每组晋级<select name="qualifiersPerGroup"><option value="2">前 2 名</option><option value="1">前 1 名</option></select></label><label>管理员 PIN（部署环境必填）<input name="adminPin" type="password"></label><button ${open ? "" : "disabled"}>生成小组赛</button></form>`; return tournamentView(tournament, open); }
+function tournamentView(tournament, scheduleEditingOpen) { const groups = tournament.groups.map((group) => `<section class="card"><h2>${e(group.id)} 组积分榜</h2><table class="standings"><thead><tr><th>队伍</th><th>赛</th><th>胜</th><th>平</th><th>负</th><th>净</th><th>分</th></tr></thead><tbody>${group.standings.map((row) => `<tr><td>${e(row.label)}</td><td>${row.played}</td><td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.goalDifference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}</tbody></table></section>`).join(""); const groupMatches = tournament.matches.map((match) => scoreForm(match, "小组赛")).join(""); const adjustable = scheduleEditingOpen && tournament.status === "group" && !tournament.matches.some((match) => match.status === "completed"); const firstDefault = tournament.groups[0]?.standings[0]?.teamId; const secondDefault = tournament.groups[1]?.standings[0]?.teamId || tournament.groups[0]?.standings[1]?.teamId; const teamChoices = (selected) => tournament.groups.flatMap((group) => group.standings.map((row) => `<option value="${e(row.teamId)}" ${row.teamId === selected ? "selected" : ""}>${e(group.id)} 组 · ${e(row.label)}</option>`)).join(""); const adjustment = adjustable ? `<form id="swap-groups" class="stack card"><h2>人工调整分组</h2><p>选择两支来自不同小组的队伍进行交换；系统会重排尚未开始的小组赛对阵。</p><label>第一支队伍<select name="firstTeamId">${teamChoices(firstDefault)}</select></label><label>第二支队伍<select name="secondTeamId">${teamChoices(secondDefault)}</select></label><label>管理员 PIN（部署环境必填）<input name="adminPin" type="password"></label><button>交换两队的小组位置</button></form>` : ""; const knockout = tournament.knockoutMatches?.length ? `<section class="card"><h2>淘汰赛</h2><div class="compact-list">${tournament.knockoutMatches.map((match) => scoreForm(match, `第 ${match.round} 轮`)).join("")}</div></section>` : `<form id="generate-knockout" class="stack card"><p>小组赛全部完成后，按积分榜自动生成淘汰赛。</p><label>管理员 PIN（部署环境必填）<input name="adminPin" type="password"></label><button ${tournament.matches.some((match) => match.status !== "completed") ? "disabled" : ""}>生成淘汰赛</button></form>`; return `<section class="page-heading"><p class="eyebrow">比赛</p><h1>${tournament.status === "knockout" ? "淘汰赛进行中" : "小组赛进行中"}</h1><p>小组赛胜 3 分、平 1 分、负 0 分；淘汰赛必须分出胜负。</p><div class="button-row"><a class="display-link" href="/display" target="_blank" rel="noreferrer">打开现场大屏</a>${scheduleEditingOpen ? '<button data-action="void" class="secondary">作废并重新分组</button>' : ""}</div></section>${adjustment}${groups}<section class="card"><h2>小组赛赛果</h2><div class="compact-list">${groupMatches}</div></section>${knockout}`; }
+function auditTab(log, ui) { const filter = ui.auditFilter || "all"; const choices = [{ id: "all", label: "全部" }, { id: "team", label: "队伍" }, { id: "code", label: "Code" }, { id: "workshop", label: "Workshop" }, { id: "competition", label: "比赛" }]; const shown = log.filter((entry) => filter === "all" || entry.action.startsWith(filter) || entry.objectType === filter || (filter === "competition" && /^(competition|tournament|match)\./.test(entry.action))).slice(0, 100); return `<section class="page-heading"><p class="eyebrow">操作记录</p><h1>现场变更可追溯</h1><p>仅显示最近 100 条操作；用于工作人员之间快速交接，不需要切换账号。</p></section><section class="filter-row">${choices.map((item) => `<button data-audit-filter="${item.id}" class="${filter === item.id ? "active" : ""}">${item.label}</button>`).join("")}</section><section class="compact-list card">${shown.map((entry) => `<article class="audit-entry"><div><strong>${e(auditLabel(entry.action))}</strong><small>${e(entry.staffNickname)} · ${e(new Date(entry.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }))}${entry.reason ? ` · ${e(entry.reason)}` : ""}</small></div></article>`).join("") || "暂无记录"}</section>`; }
+function auditLabel(action) { return ({ "participant.registered": "参与者完成登记", "participant.rebound": "参与者恢复设备状态", "team.self.created": "参与者创建队伍", "team.self.joined": "参与者加入队伍", "team.created": "工作人员创建队伍", "team.members.updated": "工作人员调整队伍", "team.removed": "工作人员解散队伍", "team.confirmed": "工作人员确认队伍", "codes.imported": "导入官方 Code", "code.issued": "发放 Workshop Code", "workshop.link.updated": "更新 Workshop 链接", "workshop.status.updated": "更新 Workshop 状态", "team.ta.qualified": "TA 确认可参赛", "team.ta.qualification.revoked": "撤销参赛资格", "competition.roster.frozen": "冻结比赛名单", "competition.roster.unfrozen": "解除比赛名单冻结", "tournament.generated": "生成小组赛", "tournament.groups.swapped": "调整小组分配", "match.result.recorded": "录入比赛赛果", "tournament.knockout.generated": "生成淘汰赛", "tournament.voided": "作废赛程", "staff.session.created": "工作人员进入工作台" })[action] || action; }
+function scoreForm(match, caption) { if (match.status === "bye") return `<article><div><strong>${e(caption)} · ${e(match.teamALabel)} vs ${e(match.teamBLabel)}</strong><small>轮空晋级：${e(match.winnerLabel)}</small></div></article>`; if (!match.teamAId || !match.teamBId) return `<article><div><strong>${e(caption)}</strong><small>等待上一轮结果</small></div></article>`; return `<form class="score-form"><input type="hidden" name="matchId" value="${e(match.id)}"><strong>${e(caption)} · ${e(match.teamALabel)} vs ${e(match.teamBLabel)}</strong><input name="scoreA" inputmode="numeric" value="${match.scoreA ?? ""}" placeholder="A"><span>:</span><input name="scoreB" inputmode="numeric" value="${match.scoreB ?? ""}" placeholder="B"><input name="adminPin" type="password" placeholder="管理员 PIN"><button>${match.status === "completed" ? "更正" : "保存"}</button></form>`; }
+function startScanner(root, state, controls, api, notice) { const box = root.querySelector("#scanner"); if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) { notice.textContent = "此手机不支持扫码，请使用昵称或人员编号搜索。"; return; } box.innerHTML = `<video autoplay playsinline muted></video><p class="hint">将参与者的个人二维码放入镜头中。</p>`; const video = box.querySelector("video"); const Detector = window.BarcodeDetector; const detector = new Detector({ formats: ["qr_code"] }); navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => { controls.ui.scannerStream = stream; video.srcObject = stream; const scan = async () => { if (!controls.ui.scannerStream) return; try { const codes = await detector.detect(video); if (codes[0]?.rawValue) { controls.ui.groupQuery = codes[0].rawValue; controls.ui.searchResults = (await api.searchParticipants(codes[0].rawValue)).participants || []; stopScanner(controls.ui); renderStaff(root, state, api, controls); } else requestAnimationFrame(scan); } catch { requestAnimationFrame(scan); } }; requestAnimationFrame(scan); }).catch(() => { notice.textContent = "无法打开相机，请使用昵称或人员编号搜索。"; }); }
+function stopScanner(ui) { ui.scannerStream?.getTracks?.().forEach((track) => track.stop()); ui.scannerStream = null; }

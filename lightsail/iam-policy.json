@@ -1,0 +1,48 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageLightsailOnlyInUsEast1",
+      "Effect": "Allow",
+      "Action": "lightsail:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "ManageAgenticFootballMonthlyBudget",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ModifyBudget",
+        "budgets:ViewBudget",
+        "budgets:DeleteBudget",
+        "billing:GetBillingViewData"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadAccountContactForBudgetNotification",
+      "Effect": "Allow",
+      "Action": "account:GetContactInformation",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadLightsailMonitoring",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    }
+  ]
+}

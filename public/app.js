@@ -1,132 +1,97 @@
 import { renderParticipant } from "./participant.js";
-import { renderAdmin } from "./admin.js";
+import { renderStaff } from "./admin.js";
 
-const CLIENT_ID_KEY = "afc-meetup-client-id";
-const PARTICIPANT_ID_KEY = "afc-meetup-participant-id";
-const ADMIN_TOKEN_KEY = "afc-meetup-admin-token";
-
+const CLIENT_KEY = "afc-event-ops-client";
+const STAFF_KEY = "afc-event-ops-staff";
 const app = document.querySelector("#app");
-const url = new URL(window.location.href);
-if (url.searchParams.get("admin")) {
-  window.sessionStorage.setItem(ADMIN_TOKEN_KEY, url.searchParams.get("admin"));
-  url.searchParams.delete("admin");
-  window.history.replaceState({}, "", url);
-}
-
 const context = {
+  clientId: localStorage.getItem(CLIENT_KEY) || crypto.randomUUID(),
+  staffSession: sessionStorage.getItem(STAFF_KEY) || "",
   state: null,
-  clientId: getOrCreateId(CLIENT_ID_KEY),
-  participantId: window.localStorage.getItem(PARTICIPANT_ID_KEY) || "",
-  adminToken: window.sessionStorage.getItem(ADMIN_TOKEN_KEY) || "",
   error: "",
-  busy: false
+  // Polling keeps the on-site view current. Keep any unfinished input local so
+  // a background refresh never sends a staff member or participant back to a
+  // form's default option.
+  formDraft: new Map(),
+  staffUi: { tab: "overview", groupQuery: "", searchResults: [], selectedMemberIds: [], auditFilter: "all" },
 };
+localStorage.setItem(CLIENT_KEY, context.clientId);
 
-const api = {
-  getState: () => request("/api/state", { admin: Boolean(context.adminToken) }),
-  createParticipant: async (payload) => {
-    const result = await request("/api/participants", { method: "POST", body: payload });
-    if (result.participant?.id) {
-      context.participantId = result.participant.id;
-      window.localStorage.setItem(PARTICIPANT_ID_KEY, context.participantId);
-    }
-    return result;
-  },
-  createTeam: (payload) => request("/api/teams", { method: "POST", body: payload }),
-  joinTeam: (payload) => request("/api/teams/join", { method: "POST", body: payload }),
-  adminCheckIn: (teamId) => request(`/api/admin/teams/${teamId}/check-in`, { method: "POST", admin: true }),
-  adminSeat: (teamId, seatId) => request(`/api/admin/teams/${teamId}/seat`, { method: "POST", body: { seatId }, admin: true }),
-  adminLock: (teamId) => request(`/api/admin/teams/${teamId}/lock`, { method: "POST", admin: true }),
-  adminCompetitionApproval: (teamId, approved) =>
-    request(`/api/admin/teams/${teamId}/competition-approval`, { method: "POST", body: { approved }, admin: true }),
-  generateTournament: (templateId) =>
-    request("/api/admin/tournament/generate", { method: "POST", body: { templateId }, admin: true }),
-  recordResult: (matchId, homeScore, awayScore) =>
-    request(`/api/admin/matches/${matchId}/result`, { method: "POST", body: { homeScore, awayScore }, admin: true })
-};
-
-async function refresh({ quiet = false } = {}) {
-  context.busy = true;
-  render();
-  try {
-    const result = await api.getState();
-    context.state = result;
-    context.error = "";
-  } catch (error) {
-    context.error = error.message || "暂时无法加载活动数据";
-  } finally {
-    context.busy = false;
-    render();
-    if (!quiet && context.error) announce(context.error);
-  }
+function draftKey(field) {
+  const form = field.closest("form")?.id || "surface";
+  const identity = field.name || field.id || (field.dataset.member ? `member:${field.value}` : "");
+  return identity ? `${location.pathname}|${form}|${identity}` : "";
 }
+function saveDraft(event) {
+  const field = event.target;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement) || field.type === "file") return;
+  const key = draftKey(field); if (!key) return;
+  context.formDraft.set(key, field instanceof HTMLInputElement && ["checkbox", "radio"].includes(field.type) ? { checked: field.checked } : { value: field.value });
+}
+function restoreDrafts(root) {
+  root.querySelectorAll("input, select, textarea").forEach((field) => {
+    const draft = context.formDraft.get(draftKey(field)); if (!draft) return;
+    if ("checked" in draft && field instanceof HTMLInputElement) field.checked = draft.checked;
+    else if ("value" in draft) field.value = draft.value;
+  });
+}
+app.addEventListener("input", saveDraft);
+app.addEventListener("change", saveDraft);
 
-async function request(path, { method = "GET", body, admin = false } = {}) {
+async function request(path, { method = "GET", body, staff = false, adminPin = "" } = {}) {
   const headers = { "x-client-id": context.clientId };
   if (body !== undefined) headers["content-type"] = "application/json";
-  if (admin) headers["x-admin-token"] = context.adminToken;
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+  if (staff && context.staffSession) headers["x-staff-session"] = context.staffSession;
+  if (adminPin) headers["x-admin-pin"] = adminPin;
+  const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "操作未完成，请重试");
-  if (data.state) context.state = data.state;
   return data;
 }
 
+const api = {
+  request,
+  register: (payload) => request("/api/participants", { method: "POST", body: payload }),
+  rebind: (payload) => request("/api/participants/rebind", { method: "POST", body: payload }),
+  createSelfTeam: () => request("/api/teams/self", { method: "POST", body: {} }),
+  joinSelfTeam: (teamNumber) => request("/api/teams/self/join", { method: "POST", body: { teamNumber } }),
+  staffLogin: (payload) => request("/api/ops/session", { method: "POST", body: payload }),
+  searchParticipants: (query) => request(`/api/ops/participants?q=${encodeURIComponent(query)}`, { staff: true }),
+  createTeam: (memberIds) => request("/api/ops/teams", { method: "POST", body: { memberIds }, staff: true }),
+  updateTeam: (teamId, memberIds) => request(`/api/ops/teams/${teamId}/members`, { method: "PUT", body: { memberIds }, staff: true }),
+  removeTeam: (teamId) => request(`/api/ops/teams/${teamId}`, { method: "DELETE", body: {}, staff: true }),
+  confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
+  updateEventGates: (gates, adminPin) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true, adminPin }),
+  importWorkshopCodes: (codes) => request("/api/ops/codes/import", { method: "POST", body: { codes }, staff: true }),
+  setWorkshopLink: (url) => request("/api/ops/workshop-link", { method: "PUT", body: { url }, staff: true }),
+  issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
+  workshopStatus: (teamId, status, note = "") => request(`/api/ops/workshop/teams/${teamId}/status`, { method: "PUT", body: { status, note }, staff: true }),
+  qualify: (teamId) => request(`/api/ops/qualification/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
+  revokeQualification: (teamId, note, adminPin) => request(`/api/ops/qualification/teams/${teamId}/revoke`, { method: "POST", body: { note }, staff: true, adminPin }),
+  freezeCompetition: (teamIds, adminPin) => request("/api/ops/competition/freeze", { method: "POST", body: { teamIds }, staff: true, adminPin }),
+  unfreezeCompetition: (adminPin) => request("/api/ops/competition/unfreeze", { method: "POST", body: {}, staff: true, adminPin }),
+  tournament: (groupCount, qualifiersPerGroup, adminPin) => request("/api/ops/competition/generate", { method: "POST", body: { groupCount, qualifiersPerGroup }, staff: true, adminPin }),
+  swapTournamentTeams: (firstTeamId, secondTeamId, adminPin) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true, adminPin }),
+  generateKnockout: (adminPin) => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true, adminPin }),
+  voidTournament: (reason, adminPin) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true, adminPin }),
+  result: (matchId, scoreA, scoreB, adminPin) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true, adminPin }),
+};
+
+async function refresh() {
+  try {
+    context.state = await request(context.staffSession ? "/api/ops/state" : "/api/state", { staff: Boolean(context.staffSession) });
+    context.error = "";
+  } catch (error) { context.error = error.message || "暂时无法加载活动数据"; }
+  render();
+}
+async function login(payload) { const result = await api.staffLogin(payload); context.staffSession = result.staffSession; sessionStorage.setItem(STAFF_KEY, result.staffSession); await refresh(); }
 function render() {
-  if (!context.state) {
-    app.innerHTML = `<main class="loading-screen"><div class="ball-mark" aria-hidden="true">●</div><p>${context.error || "正在加载北京 MeetUp…"}</p></main>`;
-    return;
-  }
-
-  const isAdmin = Boolean(context.state.admin);
-  const mode = isAdmin ? "admin" : "participant";
-  app.className = `app-shell ${mode}-mode`;
-  const surface = document.createElement("div");
-  surface.className = "app-surface";
-  app.replaceChildren(surface);
-
-  const onStateChange = async () => {
-    await refresh({ quiet: true });
-  };
-  const scopedApi = {
-    ...api,
-    request: (path, options = {}) => request(path, {
-      method: options.method || "GET",
-      body: options.body,
-      admin: path.startsWith("/api/admin/")
-    }),
-    getState: api.getState,
-    refresh: async () => {
-      await onStateChange();
-      return context.state;
-    },
-    currentParticipantId: () => context.participantId,
-    isBusy: () => context.busy
-  };
-
-  if (isAdmin) {
-    renderAdmin(surface, context.state, scopedApi, onStateChange);
-  } else {
-    renderParticipant(surface, context.state, scopedApi, onStateChange);
-  }
+  if (!context.state) { app.innerHTML = `<main class="loading-screen"><p>${context.error || "正在加载 Agentic Football 现场运营台…"}</p></main>`; return; }
+  const surface = document.createElement("main"); surface.className = "app-surface"; app.replaceChildren(surface);
+  const rerender = async () => refresh();
+  if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, refresh: rerender, ui: context.staffUi, logout: () => { sessionStorage.removeItem(STAFF_KEY); context.staffSession = ""; refresh(); } });
+  else renderParticipant(surface, context.state, api, rerender);
+  restoreDrafts(surface);
 }
-
-function getOrCreateId(key) {
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const created = crypto.randomUUID();
-  window.localStorage.setItem(key, created);
-  return created;
-}
-
-function announce(message) {
-  const element = document.querySelector("[role='status']");
-  if (element) element.textContent = message;
-}
-
 refresh();
-window.setInterval(() => refresh({ quiet: true }), 12_000);
+window.setInterval(refresh, 5000);

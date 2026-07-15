@@ -1,0 +1,11 @@
+{
+  "name": "agentic-football-event-ops-runtime",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  }
+}

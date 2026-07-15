@@ -1,0 +1,65 @@
+name: Test and deploy feedback
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feedback-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Full test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  deploy-feedback:
+    name: Deploy feedback to Lightsail
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, feedback]
+    timeout-minutes: 20
+    environment: feedback
+    env:
+      DEPLOY_PATH: /home/ubuntu/agentic-football-event-ops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lightsail:build
+      - name: Upload validated source
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude 'node_modules/' \
+            --exclude '.env' \
+            --exclude '.dev.vars*' \
+            --exclude '.local-data/' \
+            --exclude 'lightsail/.aws/' \
+            --exclude 'lightsail/.tls/' \
+            --exclude 'lightsail/.acme/' \
+            ./ "$DEPLOY_PATH/"
+      - name: Rebuild and restart feedback service
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/agentic-football-event-ops
+          sudo docker build -t agentic-football-event-ops:feedback -f lightsail/Dockerfile .
+          sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml up -d --force-recreate app caddy
+          sudo docker compose -p agentic-football-feedback -f lightsail/docker-compose.feedback-ip.yml ps

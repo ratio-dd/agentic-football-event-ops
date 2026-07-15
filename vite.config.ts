@@ -14,6 +14,14 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
+  // The worker owns routing for both the API and the two app entry paths.
+  // Explicitly expose Vite's public files as the local ASSETS binding so the
+  // same code path works in development and in the hosted Sites runtime.
+  assets: {
+    directory: "./public",
+    binding: "ASSETS",
+    run_worker_first: true,
+  },
   d1_databases: d1
     ? [
         {
@@ -53,6 +61,9 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: localBindingConfig,
+        // The event workbench does not need the Worker inspector. Disabling it
+        // also makes browser E2E runs reliable in restricted local runtimes.
+        inspectorPort: false,
       }),
     ],
   };

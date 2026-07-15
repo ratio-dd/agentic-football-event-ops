@@ -1,87 +1,172 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
+const root = new URL("../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
+const TEST_ENV = { STAFF_PINS: JSON.stringify([{ id: "test-staff", pin: "test-staff", enabled: true }]), ADMIN_PIN: "test-admin" };
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+class MemoryD1 {
+  row = null;
+  prepare(sql) {
+    const execute = async (args = []) => {
+      if (sql.startsWith("SELECT")) return this.row ? { ...this.row } : null;
+      if (sql.startsWith("INSERT")) { if (!this.row) this.row = { data: args[1], version: 1 }; return { meta: { changes: 1 } }; }
+      if (sql.startsWith("UPDATE")) {
+        if (!this.row || this.row.version !== args[4]) return { meta: { changes: 0 } };
+        this.row = { data: args[0], version: args[1] }; return { meta: { changes: 1 } };
+      }
+      return { meta: { changes: 1 } };
+    };
+    return { bind: (...args) => ({ first: () => execute(args), run: () => execute(args) }), first: () => execute(), run: () => execute() };
+  }
 }
 
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+async function eventWorker() {
+  const url = new URL("../dist/server/index.js", import.meta.url); url.searchParams.set("test", `${Date.now()}-${Math.random()}`);
+  return (await import(url.href)).default;
+}
+async function call(worker, db, path, { method = "GET", client = "", staff = "", admin = staff ? "test-admin" : "", body } = {}) {
+  const headers = new Headers(); if (client) headers.set("x-client-id", client); if (staff) headers.set("x-staff-session", staff); if (admin) headers.set("x-admin-pin", admin); if (body) headers.set("content-type", "application/json");
+  const response = await worker.fetch(new Request(`http://localhost${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined }), { ...TEST_ENV, DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  return { response, data: await response.json() };
+}
 
-  const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Codex is working/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(html, /Codex is building the first version/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+test("onsite state machine removes self-service team ownership", async () => {
+  const worker = await read("worker/index.ts");
+  assert.match(worker, /\/api\/participants\/rebind/);
+  assert.match(worker, /\/api\/ops\/codes\/import/);
+  assert.match(worker, /issueCode\(s, teamId\(pathname\)/);
+  assert.match(worker, /codeVisibleClientIds/);
+  assert.match(worker, /qualificationStatus = "ta_qualified"/);
+  assert.match(worker, /event-gates/);
+  assert.match(worker, /此环境尚未配置 Staff PIN/);
+  assert.doesNotMatch(worker, /function createTeam\(/);
+  assert.doesNotMatch(worker, /function joinTeam\(/);
+  assert.doesNotMatch(worker, /inviteCode/);
+  assert.doesNotMatch(worker, /captainId/);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
+test("mobile participant and staff surfaces match the on-site workflow", async () => {
+  const [participant, staff, app, css] = await Promise.all([
+    read("public/participant.js"), read("public/admin.js"), read("public/app.js"), read("public/styles.css"),
   ]);
+  assert.match(participant, /换手机了？恢复我的状态/);
+  assert.match(participant, /系统不设置队长/);
+  assert.match(participant, /创建一个队伍/);
+  assert.match(participant, /加入熟人队伍/);
+  assert.doesNotMatch(participant, /邀请码/);
+  assert.match(staff, /总览/);
+  assert.match(staff, /组队/);
+  assert.match(staff, /Code/);
+  assert.match(staff, /TA/);
+  assert.match(staff, /记录/);
+  assert.match(staff, /人工调整分组/);
+  assert.match(staff, /现场开关/);
+  assert.match(staff, /bottom-tabs/);
+  assert.match(app, /\/staff/);
+  assert.match(app, /formDraft/);
+  assert.match(app, /restoreDrafts/);
+  assert.match(staff, /controls\.ui\.tab/);
+  assert.match(staff, /selectedMemberIds/);
+  assert.match(staff, /<code>001<\/code> 或 <code>P-001<\/code>/);
+  assert.doesNotMatch(staff, /name="codeId"/);
+  assert.match(css, /\.bottom-tabs/);
+  assert.match(css, /grid-template-columns: repeat\(6, 1fr\)/);
+  assert.match(app, /competition\/swap/);
+  assert.match(await read("public/display.js"), /下一场/);
+});
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+test("shared deployment fails closed without configured Staff and administrator credentials", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const noStaff = await worker.fetch(new Request("https://feedback.example/api/ops/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staffPin: "anything", staffNickname: "测试" }) }), { DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  assert.equal(noStaff.status, 503);
+  const registered = await call(worker, db, "/api/participants", { method: "POST", client: "gate-phone", body: { nickname: "开关测试", supportProfile: {} } });
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "管理员" } });
+  const denied = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, admin: "wrong", body: { gates: { selfServiceTeam: false } } });
+  assert.equal(denied.response.status, 403);
+  const updated = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, body: { gates: { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true } } });
+  assert.equal(updated.response.status, 200);
+  const selfTeam = await call(worker, db, "/api/teams/self", { method: "POST", client: "gate-phone", body: {} });
+  assert.equal(selfTeam.response.status, 409);
+  assert.equal(registered.response.status, 200);
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
+test("staff can group people, issue an official code, and a rebound browser cannot read it", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const first = await call(worker, db, "/api/participants", { method: "POST", client: "phone-a", body: { nickname: "阿北", supportProfile: {} } });
+  const second = await call(worker, db, "/api/participants", { method: "POST", client: "phone-b", body: { nickname: "小南", supportProfile: {} } });
+  assert.equal(first.response.status, 200); assert.equal(second.response.status, 200);
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "TA 王" } });
+  const staff = login.data.staffSession; assert.ok(staff);
+  const grouped = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [first.data.participant.id, second.data.participant.id] } });
+  const teamId = grouped.data.team.id;
+  await call(worker, db, `/api/ops/teams/${teamId}/confirm`, { method: "POST", staff, body: {} });
+  const imported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, body: { codes: ["OFFICIAL-001", "OFFICIAL-002"] } });
+  assert.equal(imported.response.status, 200);
+  const workshopLink = await call(worker, db, "/api/ops/workshop-link", { method: "PUT", staff, body: { url: "https://workshop.example/entry" } });
+  assert.equal(workshopLink.response.status, 200);
+  const issued = await call(worker, db, `/api/ops/teams/${teamId}/issue-code`, { method: "POST", staff, body: {} });
+  assert.equal(issued.response.status, 200);
+  const originalView = await call(worker, db, "/api/state", { client: "phone-a" });
+  assert.equal(originalView.data.currentTeam.teamCode, "OFFICIAL-001");
+  assert.equal(originalView.data.event.workshopUrl, "https://workshop.example/entry");
+  const third = await call(worker, db, "/api/participants", { method: "POST", client: "phone-c", body: { nickname: "小西", supportProfile: {} } });
+  const secondGroup = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [third.data.participant.id] } });
+  await call(worker, db, `/api/ops/teams/${secondGroup.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const secondView = await call(worker, db, "/api/state", { client: "phone-c" });
+  assert.equal(secondView.data.currentTeam.teamCode, "OFFICIAL-002");
+  const staffState = await call(worker, db, "/api/ops/state", { staff });
+  assert.deepEqual(staffState.data.codeSummary, { total: 2, available: 0, issued: 2 });
+  await call(worker, db, "/api/participants/rebind", { method: "POST", client: "new-phone", body: { nickname: "阿北" } });
+  const reboundView = await call(worker, db, "/api/state", { client: "new-phone" });
+  assert.equal(reboundView.data.currentTeam.teamCode, null);
+});
 
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
+test("participants can self-organize with a team number, while staff search accepts bare participant numbers", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const first = await call(worker, db, "/api/participants", { method: "POST", client: "phone-one", body: { nickname: "自组甲", supportProfile: {} } });
+  await call(worker, db, "/api/participants", { method: "POST", client: "phone-two", body: { nickname: "自组乙", supportProfile: {} } });
+  const created = await call(worker, db, "/api/teams/self", { method: "POST", client: "phone-one", body: {} });
+  assert.equal(created.response.status, 200); assert.equal(created.data.team.teamNumber, "T-001");
+  const joined = await call(worker, db, "/api/teams/self/join", { method: "POST", client: "phone-two", body: { teamNumber: "001" } });
+  assert.equal(joined.response.status, 200); assert.equal(joined.data.team.memberIds.length, 2);
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "TA 搜索" } });
+  const found = await call(worker, db, "/api/ops/participants?q=001", { staff: login.data.staffSession });
+  assert.equal(found.response.status, 200); assert.equal(found.data.participants[0].staffShortId, first.data.participant.staffShortId);
+  const firstView = await call(worker, db, "/api/state", { client: "phone-one" });
+  assert.equal(firstView.data.currentTeam.teamNumber, "T-001");
+});
 
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("participant QR endpoint renders the current participant's P-number", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  await call(worker, db, "/api/participants", { method: "POST", client: "qr-phone", body: { nickname: "二维码体验员", supportProfile: {} } });
+  const response = await worker.fetch(new Request("http://localhost/api/participant/qr", { headers: { "x-client-id": "qr-phone" } }), { ...TEST_ENV, DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  assert.equal(response.status, 200); assert.match(response.headers.get("content-type"), /image\/svg\+xml/); assert.match(await response.text(), /svg/);
+});
+
+test("staff can adjust a draft team and run a frozen group-to-knockout tournament", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1(); const people = [];
+  for (let index = 0; index < 4; index += 1) people.push(await call(worker, db, "/api/participants", { method: "POST", client: `match-phone-${index}`, body: { nickname: `参赛${index}`, supportProfile: {} } }));
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "赛事 TA" } }); const staff = login.data.staffSession;
+  const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [people[0].data.participant.id] } });
+  const edited = await call(worker, db, `/api/ops/teams/${created.data.team.id}/members`, { method: "PUT", staff, body: { memberIds: [people[0].data.participant.id, people[1].data.participant.id] } });
+  assert.equal(edited.data.team.memberIds.length, 2);
+  const teams = [created.data.team];
+  for (const person of people.slice(2)) teams.push((await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } })).data.team);
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, body: { codes: ["C1", "C2", "C3"] } });
+  for (const item of teams) { await call(worker, db, `/api/ops/teams/${item.id}/issue-code`, { method: "POST", staff, body: {} }); await call(worker, db, `/api/ops/qualification/teams/${item.id}/confirm`, { method: "POST", staff, body: {} }); }
+  const frozen = await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, body: { teamIds: teams.map((item) => item.id) } });
+  assert.equal(frozen.response.status, 200);
+  const generated = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, body: { groupCount: 2, qualifiersPerGroup: 1 } });
+  assert.equal(generated.response.status, 200); assert.equal(generated.data.tournament.groups.length, 2);
+  const firstGroupTeam = generated.data.tournament.groups[0].teamIds[0]; const secondGroupTeam = generated.data.tournament.groups[1].teamIds[0];
+  const swapped = await call(worker, db, "/api/ops/competition/swap", { method: "POST", staff, body: { firstTeamId: firstGroupTeam, secondTeamId: secondGroupTeam } });
+  assert.equal(swapped.response.status, 200); assert.ok(swapped.data.tournament.groups[0].teamIds.includes(secondGroupTeam));
+  const display = await call(worker, db, "/api/display"); assert.equal(display.response.status, 200); assert.equal(display.data.tournament.groups.length, 2);
+  for (const match of swapped.data.tournament.matches) await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: 2, scoreB: 1 } });
+  const rejectedSwap = await call(worker, db, "/api/ops/competition/swap", { method: "POST", staff, body: { firstTeamId: secondGroupTeam, secondTeamId: firstGroupTeam } });
+  assert.equal(rejectedSwap.response.status, 409);
+  const knockout = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, body: {} });
+  assert.equal(knockout.response.status, 200); assert.equal(knockout.data.tournament.knockoutMatches.length, 1);
 });

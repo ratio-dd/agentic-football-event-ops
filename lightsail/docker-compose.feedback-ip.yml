@@ -1,0 +1,41 @@
+services:
+  app:
+    image: agentic-football-event-ops:feedback
+    container_name: agentic-football-feedback
+    env_file: ${CONFIG_ENV_FILE:-.env}
+    volumes:
+      - feedback-event-data:/data
+    networks:
+      - feedback-network
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: agentic-football-feedback-proxy
+    depends_on:
+      - app
+    env_file: ${CONFIG_ENV_FILE:-.env}
+    volumes:
+      - ./Caddyfile.feedback-ip:/etc/caddy/Caddyfile:ro
+      - ./.tls:/etc/caddy/tls:ro
+      - ./.acme:/srv/acme:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - feedback-caddy-data:/data
+      - feedback-caddy-config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - feedback-network
+    restart: unless-stopped
+
+networks:
+  feedback-network:
+    name: agentic-football-feedback-network
+
+volumes:
+  feedback-event-data:
+    external: true
+    name: agentic-football-feedback-data
+  feedback-caddy-data:
+  feedback-caddy-config:
