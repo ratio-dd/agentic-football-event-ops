@@ -11,6 +11,7 @@ on:
         options:
           - bootstrap
           - audit
+          - retire
 
 permissions:
   contents: read
@@ -65,3 +66,14 @@ jobs:
           echo "Runner systemd units:"
           systemctl list-unit-files --type=service 'actions.runner*' --no-legend || true
           systemctl list-units --all --type=service 'actions.runner*' --no-legend || true
+      - name: Schedule legacy runner retirement
+        if: inputs.mode == 'retire'
+        run: |
+          set -euo pipefail
+          readonly runner_service='actions.runner.ratio-dd-agentic-football-event-ops.agentic-football-feedback.service'
+          sudo systemd-run \
+            --unit=agentic-football-retire-runner \
+            --on-active=1min \
+            --collect \
+            /usr/bin/systemctl disable --now "$runner_service"
+          echo "Scheduled $runner_service to stop after this job has completed."
