@@ -10,6 +10,10 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+// Playwright exercises many stateful onsite flows. Its server must start with
+// an empty D1 database every run, while ordinary local development keeps its
+// project-local state for manual review.
+const isPlaywrightE2E = process.env.PLAYWRIGHT_E2E === "1";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -61,6 +65,7 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: localBindingConfig,
+        persistState: !isPlaywrightE2E,
         // The event workbench does not need the Worker inspector. Disabling it
         // also makes browser E2E runs reliable in restricted local runtimes.
         inspectorPort: false,

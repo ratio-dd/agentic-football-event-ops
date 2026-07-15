@@ -11,6 +11,9 @@ process.env.NO_PROXY = "localhost,127.0.0.1";
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
+  // The event workbench is intentionally one shared onsite state machine.
+  // Parallel files would otherwise race over the same ephemeral D1 record.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   use: {
@@ -26,11 +29,14 @@ export default defineConfig({
     command: "npm run dev -- --host 127.0.0.1 --port 4173",
     env: {
       ...process.env,
+      PLAYWRIGHT_E2E: "1",
       STAFF_PINS: JSON.stringify([{ id: "e2e-staff", pin: "meetup-staff", enabled: true }]),
       ADMIN_PIN: "meetup-admin",
     },
     url: "http://localhost:4173/",
-    reuseExistingServer: !process.env.CI,
+    // Reusing a manually started server can accidentally pick up real local
+    // workshop state and omit the test-only bindings above.
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   outputDir: "output/playwright",
