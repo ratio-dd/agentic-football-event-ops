@@ -9,15 +9,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: feedback-deploy-main
-  cancel-in-progress: true
-
 jobs:
   test:
     name: Full test suite
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: feedback-test-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,6 +52,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && vars.FEEDBACK_HOSTED_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: feedback-production-deploy
+      cancel-in-progress: false
     environment: feedback
     env:
       DEPLOY_HOST: ${{ vars.FEEDBACK_LIGHTSAIL_HOST }}
@@ -93,5 +95,5 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "ubuntu@$DEPLOY_HOST"
-          curl --fail --silent --show-error --connect-timeout 8 --max-time 15 --insecure \
+          curl --fail --silent --show-error --connect-timeout 8 --max-time 15 \
             "https://$DEPLOY_HOST/healthz"
