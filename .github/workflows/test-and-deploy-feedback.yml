@@ -69,10 +69,8 @@ jobs:
       - name: Assemble restricted deployment archive
         run: |
           set -euo pipefail
-          mkdir -p release/lightsail
+          mkdir -p release
           cp deploy-artifacts/lightsail-image.tar release/lightsail-image.tar
-          cp lightsail/docker-compose.feedback-ip.yml release/lightsail/
-          cp lightsail/deploy-from-github.sh release/lightsail/
           printf 'CANDIDATE_IMAGE=agentic-football-event-ops:feedback-%s\n' "$GITHUB_SHA" > release/manifest.env
           tar -C release -czf deploy-artifacts/feedback-release.tar.gz .
       - name: Configure restricted SSH client

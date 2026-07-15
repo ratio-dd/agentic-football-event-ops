@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # This script is invoked by a forced SSH command. It accepts exactly one
 # release archive on stdin from the GitHub-hosted deployment workflow.
+#
+# The archive may contain only an already-tested application image and its
+# manifest. Compose and this script are production platform configuration and
+# must be changed through a separate, human-operated platform release.
 set -Eeuo pipefail
 
 readonly DEPLOY_PATH="/home/ubuntu/agentic-football-event-ops"
@@ -11,25 +15,15 @@ readonly APP_CONTAINER="agentic-football-feedback"
 umask 077
 release_dir="$(mktemp -d)"
 previous_image=""
-config_backup=""
 
 cleanup() {
   rm -rf "$release_dir"
-  if [ -n "$config_backup" ]; then
-    rm -rf "$config_backup"
-  fi
 }
 
 rollback() {
   local exit_code=$?
   echo "Candidate deployment failed; restoring the previous application image." >&2
   sudo docker logs --tail 150 "$APP_CONTAINER" >&2 || true
-
-  if [ -n "$config_backup" ]; then
-    cp "$config_backup/docker-compose.feedback-ip.yml" "$COMPOSE_FILE" || true
-    cp "$config_backup/deploy-from-github.sh" "$DEPLOY_PATH/lightsail/deploy-from-github.sh" || true
-    chmod 700 "$DEPLOY_PATH/lightsail/deploy-from-github.sh" || true
-  fi
 
   if [ -n "$previous_image" ]; then
     sudo env APP_IMAGE="$previous_image" docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" \
@@ -45,9 +39,7 @@ tar -xzf - -C "$release_dir"
 
 for required_file in \
   "$release_dir/manifest.env" \
-  "$release_dir/lightsail-image.tar" \
-  "$release_dir/lightsail/docker-compose.feedback-ip.yml" \
-  "$release_dir/lightsail/deploy-from-github.sh"; do
+  "$release_dir/lightsail-image.tar"; do
   [ -f "$required_file" ] || { echo "Invalid deployment archive: missing ${required_file#$release_dir/}" >&2; exit 2; }
 done
 
@@ -58,16 +50,9 @@ if [[ ! "$candidate_image" =~ ^agentic-football-event-ops:feedback-[0-9a-f]{40}$
 fi
 
 previous_image="$(sudo docker inspect --format '{{.Config.Image}}' "$APP_CONTAINER" 2>/dev/null || true)"
-config_backup="$(mktemp -d)"
-cp "$COMPOSE_FILE" "$config_backup/docker-compose.feedback-ip.yml"
-cp "$DEPLOY_PATH/lightsail/deploy-from-github.sh" "$config_backup/deploy-from-github.sh"
 
 sudo docker load --input "$release_dir/lightsail-image.tar"
 sudo docker image inspect "$candidate_image" >/dev/null
-
-cp "$release_dir/lightsail/docker-compose.feedback-ip.yml" "$COMPOSE_FILE"
-cp "$release_dir/lightsail/deploy-from-github.sh" "$DEPLOY_PATH/lightsail/deploy-from-github.sh"
-chmod 700 "$DEPLOY_PATH/lightsail/deploy-from-github.sh"
 
 sudo env APP_IMAGE="$candidate_image" docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" \
   up -d --no-deps --force-recreate app
