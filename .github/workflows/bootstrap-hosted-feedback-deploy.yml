@@ -2,6 +2,15 @@ name: Bootstrap GitHub-hosted feedback deployment
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "One-time migration action"
+        required: true
+        default: bootstrap
+        type: choice
+        options:
+          - bootstrap
+          - audit
 
 permissions:
   contents: read
@@ -18,11 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate the one-time deployment public key
+        if: inputs.mode == 'bootstrap'
         run: |
           set -euo pipefail
           [ -n "$DEPLOY_PUBLIC_KEY" ] || { echo "Missing repository variable FEEDBACK_DEPLOY_PUBLIC_KEY." >&2; exit 2; }
           printf '%s\n' "$DEPLOY_PUBLIC_KEY" | ssh-keygen -lf - >/dev/null
       - name: Install the forced-command deployment endpoint
+        if: inputs.mode == 'bootstrap'
         run: |
           set -euo pipefail
           install -m 700 lightsail/deploy-from-github.sh "$DEPLOY_PATH/lightsail/deploy-from-github.sh"
@@ -44,3 +55,13 @@ jobs:
           } >> "$temporary_file"
           install -m 600 "$temporary_file" "$HOME/.ssh/authorized_keys"
           rm -f "$temporary_file"
+      - name: Audit legacy self-hosted runner (read-only)
+        if: inputs.mode == 'audit'
+        run: |
+          set -euo pipefail
+          echo "Runner user: $(id -un)"
+          echo "Runner service scripts:"
+          find "$HOME" -maxdepth 3 -type f -name svc.sh -print
+          echo "Runner systemd units:"
+          systemctl list-unit-files --type=service 'actions.runner*' --no-legend || true
+          systemctl list-units --all --type=service 'actions.runner*' --no-legend || true
