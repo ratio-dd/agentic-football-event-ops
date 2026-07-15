@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 const localChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const launchOptions = process.env.CI ? {} : { executablePath: localChrome };
 
 // Playwright's local web-server readiness check must never use a workstation
 // proxy for loopback traffic.
@@ -15,7 +16,9 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:4173",
     browserName: "chromium",
-    launchOptions: { executablePath: localChrome },
+    // CI uses Playwright-managed Chromium; the local workflow intentionally
+    // keeps using the user's installed Chrome for realistic desktop checks.
+    launchOptions,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
