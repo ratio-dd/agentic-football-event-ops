@@ -26,6 +26,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Configure isolated Worker bindings for E2E
+        run: |
+          cat > .dev.vars <<'EOF'
+          STAFF_PINS=[{"id":"e2e-staff","pin":"meetup-staff","enabled":true}]
+          ADMIN_PIN=meetup-admin
+          EOF
       - run: npm test
 
   deploy-feedback:
