@@ -34,6 +34,7 @@ const worker = {
       if (pathname === "/api/ops/event-gates" && request.method === "PUT") return mutation(env, request, (s) => updateEventGates(s, request, staff, env));
       if (pathname.startsWith("/api/ops/participants") && request.method === "GET") return json(await participantSearch(env, url.searchParams.get("q") || ""));
       if (pathname === "/api/ops/teams" && request.method === "POST") return mutation(env, request, (s) => makeTeam(s, request, staff));
+      if (pathname === "/api/ops/assignments" && request.method === "POST") return mutation(env, request, (s) => dispatchPeople(s, request, staff));
       if (/^\/api\/ops\/teams\/[^/]+\/members$/.test(pathname) && request.method === "PUT") return mutation(env, request, (s) => updateTeam(s, teamId(pathname), request, staff));
       if (/^\/api\/ops\/teams\/[^/]+$/.test(pathname) && request.method === "DELETE") return mutation(env, request, (s) => removeTeam(s, teamId(pathname), staff));
       if (/^\/api\/ops\/teams\/[^/]+\/confirm$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => confirmTeam(s, teamId(pathname), staff));
@@ -80,7 +81,7 @@ function normalise(raw: any): State {
   const base = initialState();
   const participants = Array.isArray(raw?.participants) ? raw.participants.map((p: any, index: number) => ({ id: p.id || id(), nickname: p.nickname || `参与者${index + 1}`, clientIds: p.clientIds || (p.clientId ? [p.clientId] : []), codeVisibleClientIds: p.codeVisibleClientIds || (p.clientId ? [p.clientId] : []), staffShortId: p.staffShortId || `P-${String(index + 1).padStart(3, "0")}`, supportProfile: p.supportProfile || { techBackground: p.survey?.role || "unknown", workshopExperience: "unknown" }, teamId: p.teamId || null, registeredAt: p.registeredAt || p.createdAt || now(), reboundAt: p.reboundAt || null })) : [];
   const workshopCodes = Array.isArray(raw?.workshopCodes) ? raw.workshopCodes.map((c: any) => ({ id: c.id || id(), code: text(c.code, 160), status: c.status === "assigned" ? "assigned" : "available", teamId: c.teamId || null, assignedAt: c.assignedAt || null, assignedBy: c.assignedBy || null })).filter((c: any) => c.code) : [];
-  const teams = Array.isArray(raw?.teams) ? raw.teams.map((t: any, index: number) => ({ ...t, teamNumber: t.teamNumber || `T-${String(index + 1).padStart(3, "0")}`, codeIssuedAt: t.codeIssuedAt || (t.workshopCodeId ? workshopCodes.find((c: any) => c.id === t.workshopCodeId)?.assignedAt || t.createdAt || now() : null), codeIssuedBy: t.codeIssuedBy || null, workshopCodeId: t.workshopCodeId || null })) : [];
+  const teams = Array.isArray(raw?.teams) ? raw.teams.map((t: any, index: number) => ({ ...t, memberIds: ids(t.memberIds), status: t.status === "dissolved" ? "dissolved" : (t.status || "draft"), codeIssuedAt: t.codeIssuedAt || (t.workshopCodeId ? workshopCodes.find((c: any) => c.id === t.workshopCodeId)?.assignedAt || t.createdAt || now() : null), codeIssuedBy: t.codeIssuedBy || null, workshopCodeId: t.workshopCodeId || null, dissolvedAt: t.dissolvedAt || null, dissolutionCodeAction: t.dissolutionCodeAction || null })) : [];
   return { ...base, ...raw, event: { ...base.event, ...(raw?.event || {}), gates: { ...defaultGates(), ...(raw?.event?.gates || {}) } }, participants, teams, workshopCodes, competition: { ...base.competition, ...(raw?.competition || {}) }, staffAccounts: Array.isArray(raw?.staffAccounts) ? raw.staffAccounts : base.staffAccounts, staffSessions: Array.isArray(raw?.staffSessions) ? raw.staffSessions : [], auditLog: Array.isArray(raw?.auditLog) ? raw.auditLog : [] };
 }
 
@@ -96,7 +97,7 @@ async function participantQr(env: Env, request: Request, url: URL) { const { sta
 function audit(s: State, actor: Staff | { id: string; nickname: string }, action: string, objectType: string, objectId: string, reason = "") { s.auditLog.push({ id: id(), staffAccountId: actor.id, staffNickname: actor.nickname, action, objectType, objectId, reason, at: now() }); if (s.auditLog.length > 500) s.auditLog.splice(0, s.auditLog.length - 500); }
 function team(s: State, value: string) { return s.teams.find((t: any) => t.id === value); }
 function teamByNumber(s: State, value: string) { return s.teams.find((t: any) => t.teamNumber === normaliseTeamNumber(value)); }
-function nextTeamNumber(s: State) { return `T-${String(s.teams.length + 1).padStart(3, "0")}`; }
+function nextTeamNumber(s: State) { const highest = s.teams.reduce((max: number, t: any) => Math.max(max, Number(String(t.teamNumber || "").replace(/\D/g, "")) || 0), 0); return `T-${String(highest + 1).padStart(3, "0")}`; }
 function normaliseTeamNumber(value: unknown) { const numeric = text(value, 20).toUpperCase().replace(/^T[-\s]?/, "").replace(/^0+/, "") || "0"; return `T-${numeric.padStart(3, "0")}`; }
 function after(path: string, marker: string) { const parts = path.split("/"); return decodeURIComponent(parts[parts.indexOf(marker) + 1] || ""); }
 function teamId(path: string) { return after(path, "teams"); }
@@ -143,8 +144,64 @@ function setOfficialLabels(s: State, groups: any[]) { groups.forEach((group) => 
 function groupFixtures(groups: any[]) { const matches: any[] = []; groups.forEach((group) => { for (let a = 0; a < group.teamIds.length; a += 1) for (let bIndex = a + 1; bIndex < group.teamIds.length; bIndex += 1) matches.push({ id: id(), stage: "group", groupId: group.id, teamAId: group.teamIds[a], teamBId: group.teamIds[bIndex], status: "ready", scoreA: null, scoreB: null, winnerId: null }); }); return matches; }
 
 async function makeTeam(s: State, request: Request, actor: Staff) { const b = await body(request); const memberIds = ids(b.memberIds); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人"); const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId)); if (members.some((p) => !p || p.teamId)) return fail("成员不存在或已在其他队伍中", 409); const t = teamRecord(s, memberIds); s.teams.push(t); members.forEach((p: any) => { p.teamId = t.id; }); audit(s, actor, "team.created", "team", t.id); return { team: t }; }
-async function updateTeam(s: State, value: string, request: Request, actor: Staff) { const t = team(s, value); const b = await body(request); const memberIds = ids(b.memberIds); if (!t) return fail("队伍不存在", 404); if (t.codeIssuedAt) return fail("该队已发放资源，无法更改成员", 409); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人"); const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId)); if (members.some((p: any) => !p || (p.teamId && p.teamId !== t.id))) return fail("成员不存在或已在其他队伍中", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; }); members.forEach((p: any) => { p.teamId = t.id; }); t.memberIds = memberIds; audit(s, actor, "team.members.updated", "team", t.id, text(b.reason, 120)); return { team: t }; }
-function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (t.codeIssuedAt) return fail("该队已发放资源，无法解散", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; }); s.teams = s.teams.filter((candidate: any) => candidate.id !== t.id); audit(s, actor, "team.removed", "team", t.id); return { removedTeamId: t.id }; }
+function codeDissolutionAction(value: unknown) { return ["keep", "reclaim", "dissolve"].includes(text(value, 20)) ? text(value, 20) : ""; }
+function dissolveTeam(s: State, t: any, action: string, actor: Staff) {
+  if (t.status === "dissolved") return;
+  if (t.workshopCodeId && action === "reclaim") {
+    const code = s.workshopCodes.find((item: any) => item.id === t.workshopCodeId);
+    if (code) { code.status = "available"; code.teamId = null; code.assignedAt = null; code.assignedBy = null; }
+    t.workshopCodeId = null; t.codeIssuedAt = null; t.codeIssuedBy = null;
+    audit(s, actor, "code.reclaimed", "team", t.id, "队伍解散时回收");
+  }
+  t.status = "dissolved"; t.dissolvedAt = now(); t.dissolutionCodeAction = action || "dissolve";
+  t.workshopStatus = "not_started"; t.qualificationStatus = "not_qualified";
+  audit(s, actor, "team.dissolved", "team", t.id, action === "reclaim" ? "Code 已回收" : (t.codeIssuedAt ? "Code 保留为已消耗" : "未发放 Code"));
+}
+function grantCurrentCodeVisibility(t: any, members: any[]) { if (!t.codeIssuedAt) return; members.forEach((p) => p.clientIds.forEach((clientId: string) => { if (!p.codeVisibleClientIds.includes(clientId)) p.codeVisibleClientIds.push(clientId); })); }
+function dispatchAssignment(s: State, b: any, actor: Staff) {
+  const participantIds = ids(b.participantIds); const targetValue = text(b.targetTeamId, 80); const createTarget = targetValue === "new";
+  if (participantIds.length < 1 || participantIds.length > 3) return fail("一次只能调度 1–3 人");
+  const people = participantIds.map((participantId) => s.participants.find((p: any) => p.id === participantId));
+  if (people.some((p) => !p)) return fail("存在未找到的人员", 404);
+  let target = createTarget ? teamRecord(s, []) : (targetValue ? team(s, targetValue) : null);
+  if (targetValue && !target) return fail("目标队伍不存在", 404);
+  if (target?.status === "dissolved") return fail("已解散队伍不能再加入成员", 409);
+  const selectedIds = new Set(participantIds);
+  const retainedTargetIds = target ? target.memberIds.filter((memberId: string) => !selectedIds.has(memberId)) : [];
+  const finalTargetIds = target ? [...new Set([...retainedTargetIds, ...participantIds])] : [];
+  if (finalTargetIds.length > 3) return fail(`目标队伍容量不足：当前操作后将有 ${finalTargetIds.length} 人，最多 3 人`, 409);
+
+  const sourceTeams = [...new Set(people.map((p: any) => p.teamId).filter((teamId: string | null) => teamId && teamId !== target?.id))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  const actions = b.dissolutionActions && typeof b.dissolutionActions === "object" ? b.dissolutionActions : {};
+  const emptySources = sourceTeams.filter((source: any) => source.memberIds.every((memberId: string) => selectedIds.has(memberId)));
+  for (const source of emptySources) {
+    const action = codeDissolutionAction(actions[source.id]);
+    if (!action) return fail(`${source.teamNumber} 将因移出最后一名成员而解散，请选择 Code 处理方式`, 409);
+    if (source.workshopCodeId && !["keep", "reclaim"].includes(action)) return fail(`${source.teamNumber} 已有关联 Code，请选择保留或回收`, 409);
+    if (!source.workshopCodeId && action !== "dissolve") return fail(`${source.teamNumber} 未关联 Code，应直接解散`, 409);
+  }
+
+  if (createTarget && target) s.teams.push(target);
+  sourceTeams.forEach((source: any) => { source.memberIds = source.memberIds.filter((memberId: string) => !selectedIds.has(memberId)); });
+  if (target) target.memberIds = finalTargetIds;
+  people.forEach((p: any) => { p.teamId = target?.id || null; });
+  if (target) grantCurrentCodeVisibility(target, people);
+  emptySources.forEach((source: any) => dissolveTeam(s, source, codeDissolutionAction(actions[source.id]), actor));
+  audit(s, actor, createTarget ? "team.created" : (target ? "team.members.dispatched" : "team.members.removed"), "team", target?.id || "unassigned", text(b.reason, 120));
+  return { team: target || null, affectedTeamIds: [...sourceTeams.map((source: any) => source.id), ...(target ? [target.id] : [])] };
+}
+async function dispatchPeople(s: State, request: Request, actor: Staff) { return dispatchAssignment(s, await body(request), actor); }
+async function updateTeam(s: State, value: string, request: Request, actor: Staff) {
+  const t = team(s, value); const b = await body(request); const memberIds = ids(b.memberIds);
+  if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404);
+  if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人");
+  const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId));
+  if (members.some((p: any) => !p || (p.teamId && p.teamId !== t.id))) return fail("成员不存在或已在其他队伍中", 409);
+  s.participants.filter((p: any) => p.teamId === t.id && !memberIds.includes(p.id)).forEach((p: any) => { p.teamId = null; });
+  members.forEach((p: any) => { p.teamId = t.id; }); t.memberIds = memberIds; grantCurrentCodeVisibility(t, members);
+  audit(s, actor, "team.members.updated", "team", t.id, text(b.reason, 120)); return { team: t };
+}
+function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404); if (t.workshopCodeId) return fail("已关联 Code 的队伍需要在解散弹窗中选择保留或回收", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; }); t.memberIds = []; dissolveTeam(s, t, "dissolve", actor); return { removedTeamId: t.id }; }
 function confirmTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (t.codeIssuedAt) return { team: t }; t.status = "ready_code"; audit(s, actor, "team.confirmed", "team", t.id); return { team: t }; }
 async function importCodes(s: State, request: Request, actor: Staff) {
   const b = await body(request); const codes = [...new Set((Array.isArray(b.codes) ? b.codes : []).map((value: unknown) => text(value, 160)).filter(Boolean))];

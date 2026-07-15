@@ -68,8 +68,10 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(app, /formDraft/);
   assert.match(app, /restoreDrafts/);
   assert.match(staff, /controls\.ui\.tab/);
-  assert.match(staff, /selectedMemberIds/);
-  assert.match(staff, /<code>001<\/code> 或 <code>P-001<\/code>/);
+  assert.match(staff, /selectedPersonIds/);
+  assert.match(staff, /人员和队伍是两种资源/);
+  assert.match(staff, /容量不足/);
+  assert.match(staff, /回收 Code 至可发放池/);
   assert.doesNotMatch(staff, /name="codeId"/);
   assert.match(css, /\.bottom-tabs/);
   assert.match(css, /grid-template-columns: repeat\(6, 1fr\)/);
@@ -136,6 +138,29 @@ test("participants can self-organize with a team number, while staff search acce
   assert.equal(found.response.status, 200); assert.equal(found.data.participants[0].staffShortId, first.data.participant.staffShortId);
   const firstView = await call(worker, db, "/api/state", { client: "phone-one" });
   assert.equal(firstView.data.currentTeam.teamNumber, "T-001");
+});
+
+test("Staff dispatch is atomic: code visibility follows membership and a dissolved team can reclaim its code", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const north = await call(worker, db, "/api/participants", { method: "POST", client: "north-phone", body: { nickname: "调度北", supportProfile: {} } });
+  const south = await call(worker, db, "/api/participants", { method: "POST", client: "south-phone", body: { nickname: "调度南", supportProfile: {} } });
+  const west = await call(worker, db, "/api/participants", { method: "POST", client: "west-phone", body: { nickname: "调度西", supportProfile: {} } });
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "调度 TA" } }); const staff = login.data.staffSession;
+  const northTeam = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [north.data.participant.id] } });
+  const westTeam = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [west.data.participant.id] } });
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, body: { codes: ["DISPATCH-001", "DISPATCH-002"] } });
+  await call(worker, db, `/api/ops/teams/${northTeam.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  await call(worker, db, `/api/ops/teams/${westTeam.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const added = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [south.data.participant.id], targetTeamId: northTeam.data.team.id } });
+  assert.equal(added.response.status, 200);
+  const southView = await call(worker, db, "/api/state", { client: "south-phone" }); assert.equal(southView.data.currentTeam.teamCode, "DISPATCH-001");
+  const movedOut = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [north.data.participant.id], targetTeamId: "" } });
+  assert.equal(movedOut.response.status, 200); const northView = await call(worker, db, "/api/state", { client: "north-phone" }); assert.equal(northView.data.currentTeam, null);
+  const reclaimed = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [west.data.participant.id], targetTeamId: "", dissolutionActions: { [westTeam.data.team.id]: "reclaim" } } });
+  assert.equal(reclaimed.response.status, 200);
+  const state = await call(worker, db, "/api/ops/state", { staff });
+  assert.equal(state.data.teams.find((team) => team.id === westTeam.data.team.id).status, "dissolved");
+  assert.equal(state.data.codeSummary.available, 1);
 });
 
 test("participant QR endpoint renders the current participant's P-number", async () => {

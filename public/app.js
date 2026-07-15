@@ -58,6 +58,7 @@ const api = {
   staffLogin: (payload) => request("/api/ops/session", { method: "POST", body: payload }),
   searchParticipants: (query) => request(`/api/ops/participants?q=${encodeURIComponent(query)}`, { staff: true }),
   createTeam: (memberIds) => request("/api/ops/teams", { method: "POST", body: { memberIds }, staff: true }),
+  dispatchPeople: (participantIds, targetTeamId, dissolutionActions = {}) => request("/api/ops/assignments", { method: "POST", body: { participantIds, targetTeamId, dissolutionActions }, staff: true }),
   updateTeam: (teamId, memberIds) => request(`/api/ops/teams/${teamId}/members`, { method: "PUT", body: { memberIds }, staff: true }),
   removeTeam: (teamId) => request(`/api/ops/teams/${teamId}`, { method: "DELETE", body: {}, staff: true }),
   confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
