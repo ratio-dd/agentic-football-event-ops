@@ -1,0 +1,39 @@
+name: Probe public health
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentic-football-public-health-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: Public health endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fail only after two public checks fail
+        run: |
+          set -euo pipefail
+          endpoint="https://100.60.68.188/healthz"
+
+          for check in 1 2; do
+            if response="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 "$endpoint")"; then
+              echo "check ${check}: ${response}"
+              exit 0
+            fi
+
+            echo "check ${check} failed" >&2
+            if [ "$check" = 1 ]; then
+              sleep 10
+            fi
+          done
+
+          echo "Public health endpoint failed twice: ${endpoint}" >&2
+          exit 1
