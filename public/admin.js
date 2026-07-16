@@ -3,7 +3,7 @@ const status = (team) => ({ draft: "编组中", ready_code: "待发 Code", issue
 const members = (team) => `${e(team.teamNumber)} · ${team.members.map((m) => `${e(m.nickname)} · ${e(m.staffShortId)}`).join("、")}`;
 
 export function renderStaff(root, state, api, controls) {
-  stopScanner(controls.ui);
+  if (!controls.ui.scannerOpen) stopScanner(controls.ui);
   if (!state.staffSession && !state.participants) return loginView(root, controls);
   const tab = controls.ui.tab || "overview"; const teams = state.teams || []; const qualified = teams.filter((t) => t.qualificationStatus === "ta_qualified").length;
   const content = { overview: overview(state, teams, qualified, controls.ui), grouping: grouping(state, controls.ui), codes: codeTab(state, teams), ta: taTab(state, teams, controls.ui), competition: competition(state, teams, controls.ui), audit: auditTab(state.auditLog || [], controls.ui) }[tab];
@@ -29,9 +29,13 @@ export function renderStaff(root, state, api, controls) {
   };
   root.addEventListener("click", (event) => {
     const button = event.target.closest("button"); if (!button) return;
-    if (button.dataset.tab) { controls.ui.tab = button.dataset.tab; renderStaff(root, state, api, controls); return; }
-    if (button.dataset.action === "logout") return controls.logout();
+    if (button.dataset.tab) { closeScanner(controls.ui); controls.ui.tab = button.dataset.tab; renderStaff(root, state, api, controls); return; }
+    if (button.dataset.action === "logout") { closeScanner(controls.ui); return controls.logout(); }
     if (button.dataset.action === "scan") return startScanner(root, state, controls, api, notice);
+    if (button.dataset.action === "stop-scan") { closeScanner(controls.ui); return renderStaff(root, state, api, controls); }
+    if (button.dataset.action === "scan-again") { controls.ui.scanResultRaw = ""; controls.ui.scanResultPersonId = ""; controls.ui.peopleQuery = ""; return startScanner(root, state, controls, api, notice); }
+    if (button.dataset.action === "select-scan-result") { controls.ui.selectedPersonIds = [button.dataset.personId]; return renderStaff(root, state, api, controls); }
+    if (button.dataset.action === "open-scan-result-team") { controls.ui.groupingTab = "teams"; controls.ui.teamConfigId = button.dataset.teamId; controls.ui.selectedPersonIds = []; return renderStaff(root, state, api, controls); }
     if (button.dataset.filter) { controls.ui.taFilter = button.dataset.filter; return renderStaff(root, state, api, controls); }
     if (button.dataset.auditFilter) { controls.ui.auditFilter = button.dataset.auditFilter; return renderStaff(root, state, api, controls); }
     if (button.dataset.groupingTab) { controls.ui.groupingTab = button.dataset.groupingTab; controls.ui.selectedPersonIds = []; controls.ui.teamConfigId = null; return renderStaff(root, state, api, controls); }
@@ -90,6 +94,14 @@ function overview(state, teams, qualified, ui) {
 function activeTeams(state) { return state.teams.filter((team) => team.status !== "dissolved"); }
 function teamById(state, id) { return state.teams.find((team) => team.id === id); }
 function personStatus(state, person) { const current = person.teamId ? teamById(state, person.teamId) : null; return current ? `${current.teamNumber} · ${status(current)}` : "无队"; }
+function scanResult(state, ui) {
+  if (!ui.scanResultRaw) return "";
+  const person = state.participants.find((item) => item.id === ui.scanResultPersonId) || queryPeople(state, ui.scanResultRaw)[0];
+  if (!person) return `<section class="scan-result scan-result-miss" aria-live="polite"><p class="eyebrow">扫描结果</p><h2>未找到参与者</h2><p>编号 ${e(ui.scanResultRaw)} 尚未登记。请核对二维码，或改用手动搜索。</p><button type="button" data-action="scan-again" class="secondary">重新扫码</button></section>`;
+  const team = person.teamId ? teamById(state, person.teamId) : null;
+  const resource = team ? resourceState(state, team) : null;
+  return `<section class="scan-result" aria-live="polite"><p class="eyebrow">扫描结果</p><h2>${e(person.nickname)}</h2><p>${e(person.staffShortId)} · ${e(personStatus(state, person))}</p>${resource ? `<small>${e(resource.label)}</small>` : ""}<div class="button-row"><button type="button" data-action="select-scan-result" data-person-id="${e(person.id)}">选中并调度</button>${team ? `<button type="button" data-action="open-scan-result-team" data-team-id="${e(team.id)}" class="secondary">查看 ${e(team.teamNumber)}</button>` : ""}<button type="button" data-action="scan-again" class="text-button">重新扫码</button></div></section>`;
+}
 function queryPeople(state, query, filter = "all", excludeTeamId = "") {
   const key = String(query || "").trim().toLowerCase(); const numberKey = key.replace(/^p[-\s]?/, "").replace(/^0+/, "");
   return state.participants.filter((person) => {
@@ -126,7 +138,7 @@ function targetCapacity(state, team, selectedIds) { const selected = new Set(sel
 function queueAssignment(state, ui, targetTeamId) { const participantIds = ui.selectedPersonIds || []; if (!participantIds.length) return; const selected = new Set(participantIds); const sourceTeams = [...new Set(state.participants.filter((person) => selected.has(person.id) && person.teamId && person.teamId !== targetTeamId).map((person) => person.teamId))].map((id) => teamById(state, id)).filter(Boolean); const empties = sourceTeams.filter((team) => team.memberIds.every((id) => selected.has(id))); const defaults = { ...(ui.dissolutionActions || {}) }; empties.forEach((team) => { if (!defaults[team.id]) defaults[team.id] = team.workshopCodeId ? "keep" : "dissolve"; }); ui.dissolutionActions = defaults; ui.pendingAssignment = { participantIds, targetTeamId, emptyTeamIds: empties.map((team) => team.id) }; }
 function peopleBoard(state, ui) {
   const selected = ui.selectedPersonIds || []; const filter = ui.peopleFilter || "all"; const shown = queryPeople(state, ui.peopleQuery, filter);
-  return `<section class="card dispatch-board"><div class="button-row"><button type="button" data-action="scan" class="secondary">扫码找人</button></div><label>查找人员<input id="people-search" autocomplete="off" placeholder="昵称、001 或 P-001" value="${e(ui.peopleQuery || "")}"></label><div id="scanner" class="scanner"></div><div class="filter-row"><button data-people-filter="all" class="${filter === "all" ? "active" : ""}">全部 ${state.participants.length}</button><button data-people-filter="unassigned" class="${filter === "unassigned" ? "active" : ""}">无队 ${state.participants.filter((person) => !person.teamId).length}</button><button data-people-filter="assigned" class="${filter === "assigned" ? "active" : ""}">有队 ${state.participants.filter((person) => person.teamId).length}</button></div><div class="dispatch-list">${shown.map((person) => personRow(state, person, selected.includes(person.id))).join("") || '<p class="hint">没有匹配的人员。</p>'}</div></section>${selected.length ? selectionTray(state, ui) : ""}`;
+  return `<section class="card dispatch-board"><div class="button-row"><button type="button" data-action="scan" class="secondary">扫描参与者二维码</button></div><label>查找人员<input id="people-search" autocomplete="off" placeholder="昵称、001 或 P-001" value="${e(ui.peopleQuery || "")}"><small>扫码不可用时，可直接按昵称或人员编号查找。</small></label><div id="scanner" class="scanner"></div>${scanResult(state, ui)}<div class="filter-row"><button data-people-filter="all" class="${filter === "all" ? "active" : ""}">全部 ${state.participants.length}</button><button data-people-filter="unassigned" class="${filter === "unassigned" ? "active" : ""}">无队 ${state.participants.filter((person) => !person.teamId).length}</button><button data-people-filter="assigned" class="${filter === "assigned" ? "active" : ""}">有队 ${state.participants.filter((person) => person.teamId).length}</button></div><div class="dispatch-list">${shown.map((person) => personRow(state, person, selected.includes(person.id))).join("") || '<p class="hint">没有匹配的人员。</p>'}</div></section>${selected.length ? selectionTray(state, ui) : ""}`;
 }
 function personRow(state, person, selected) { return `<button type="button" class="dispatch-person-row ${selected ? "is-selected" : ""}" data-action="toggle-person" data-person-id="${e(person.id)}" aria-pressed="${selected}"><span><strong>${e(person.nickname)}</strong><small>${e(person.staffShortId)} · ${e(personStatus(state, person))}</small></span><span class="dispatch-check">${selected ? "已选" : "选择"}</span></button>`; }
 function selectionTray(state, ui) { const selected = (ui.selectedPersonIds || []).map((id) => state.participants.find((person) => person.id === id)).filter(Boolean); return `<section class="selection-tray"><div><strong>已选择 ${selected.length} / 3 人</strong><small>${selected.map((person) => `${e(person.nickname)} ${e(person.staffShortId)}`).join("、")}</small></div><div><button data-action="new-team">下一步：确认新队</button><button data-action="open-team-picker" class="secondary">加入队伍</button><button data-action="remove-selected" class="secondary">移出队伍</button><button data-action="clear-people" class="text-button">清除</button></div></section>`; }
@@ -162,5 +174,39 @@ function tournamentView(tournament, scheduleEditingOpen) { const groups = tourna
 function auditTab(log, ui) { const filter = ui.auditFilter || "all"; const choices = [{ id: "all", label: "全部" }, { id: "team", label: "队伍" }, { id: "code", label: "Code" }, { id: "workshop", label: "Workshop" }, { id: "competition", label: "比赛" }]; const shown = log.filter((entry) => filter === "all" || entry.action.startsWith(filter) || entry.objectType === filter || (filter === "competition" && /^(competition|tournament|match)\./.test(entry.action))).slice(0, 100); return `<section class="page-heading"><p class="eyebrow">操作记录</p><h1>现场变更可追溯</h1><p>仅显示最近 100 条操作；用于工作人员之间快速交接，不需要切换账号。</p></section><section class="filter-row">${choices.map((item) => `<button data-audit-filter="${item.id}" class="${filter === item.id ? "active" : ""}">${item.label}</button>`).join("")}</section><section class="compact-list card">${shown.map((entry) => `<article class="audit-entry"><div><strong>${e(auditLabel(entry.action))}</strong><small>${e(entry.staffNickname)} · ${e(new Date(entry.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }))}${entry.reason ? ` · ${e(entry.reason)}` : ""}</small></div></article>`).join("") || "暂无记录"}</section>`; }
 function auditLabel(action) { return ({ "participant.registered": "参与者完成登记", "participant.rebound": "参与者恢复设备状态", "team.self.created": "参与者创建队伍", "team.self.joined": "参与者加入队伍", "team.created": "工作人员创建队伍", "team.members.updated": "工作人员调整队伍", "team.removed": "工作人员解散队伍", "team.confirmed": "工作人员确认队伍", "codes.imported": "导入官方 Code", "code.issued": "发放 Workshop Code", "workshop.link.updated": "更新 Workshop 链接", "workshop.status.updated": "更新 Workshop 状态", "team.ta.qualified": "TA 确认可参赛", "team.ta.qualification.revoked": "撤销参赛资格", "competition.roster.frozen": "冻结比赛名单", "competition.roster.unfrozen": "解除比赛名单冻结", "tournament.generated": "生成小组赛", "tournament.groups.swapped": "调整小组分配", "match.result.recorded": "录入比赛赛果", "tournament.knockout.generated": "生成淘汰赛", "tournament.voided": "作废赛程", "staff.session.created": "工作人员进入工作台" })[action] || action; }
 function scoreForm(match, caption) { if (match.status === "bye") return `<article><div><strong>${e(caption)} · ${e(match.teamALabel)} vs ${e(match.teamBLabel)}</strong><small>轮空晋级：${e(match.winnerLabel)}</small></div></article>`; if (!match.teamAId || !match.teamBId) return `<article><div><strong>${e(caption)}</strong><small>等待上一轮结果</small></div></article>`; return `<form class="score-form"><input type="hidden" name="matchId" value="${e(match.id)}"><strong>${e(caption)} · ${e(match.teamALabel)} vs ${e(match.teamBLabel)}</strong><input name="scoreA" inputmode="numeric" value="${match.scoreA ?? ""}" placeholder="A"><span>:</span><input name="scoreB" inputmode="numeric" value="${match.scoreB ?? ""}" placeholder="B"><input name="adminPin" type="password" placeholder="管理员 PIN"><button>${match.status === "completed" ? "更正" : "保存"}</button></form>`; }
-function startScanner(root, state, controls, api, notice) { const box = root.querySelector("#scanner"); if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) { notice.textContent = "此手机不支持扫码，请使用昵称或人员编号搜索。"; return; } box.innerHTML = `<video autoplay playsinline muted></video><p class="hint">将参与者的个人二维码放入镜头中。</p>`; const video = box.querySelector("video"); const Detector = window.BarcodeDetector; const detector = new Detector({ formats: ["qr_code"] }); navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => { controls.ui.scannerStream = stream; video.srcObject = stream; const scan = async () => { if (!controls.ui.scannerStream) return; try { const codes = await detector.detect(video); if (codes[0]?.rawValue) { controls.ui.peopleQuery = codes[0].rawValue; stopScanner(controls.ui); renderStaff(root, state, api, controls); } else requestAnimationFrame(scan); } catch { requestAnimationFrame(scan); } }; requestAnimationFrame(scan); }).catch(() => { notice.textContent = "无法打开相机，请使用昵称或人员编号搜索。"; }); }
+function startScanner(root, state, controls, api, notice) {
+  const box = root.querySelector("#scanner");
+  controls.ui.scannerOpen = true;
+  if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) {
+    controls.ui.scannerOpen = false;
+    notice.textContent = "此手机不支持扫码，请使用昵称或人员编号搜索。";
+    box.innerHTML = '<p class="hint">请改用上方的昵称或人员编号搜索。</p>';
+    return;
+  }
+  box.innerHTML = `<section class="scanner-panel" aria-live="polite"><div class="scanner-toolbar"><strong>正在扫描参与者二维码</strong><button type="button" data-action="stop-scan" class="secondary">关闭扫描</button></div><video autoplay playsinline muted></video><p class="hint">将参与者的个人二维码放入镜头中；也可随时关闭后手动搜索。</p></section>`;
+  const video = box.querySelector("video"); const Detector = window.BarcodeDetector; const detector = new Detector({ formats: ["qr_code"] });
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then((stream) => {
+    controls.ui.scannerStream = stream; video.srcObject = stream;
+    const scan = async () => {
+      if (!controls.ui.scannerStream) return;
+      try {
+        const codes = await detector.detect(video);
+        if (codes[0]?.rawValue) {
+          const rawValue = String(codes[0].rawValue).trim();
+          controls.ui.peopleQuery = rawValue;
+          controls.ui.scanResultRaw = rawValue;
+          controls.ui.scanResultPersonId = queryPeople(state, rawValue)[0]?.id || "";
+          closeScanner(controls.ui);
+          renderStaff(root, state, api, controls);
+        } else requestAnimationFrame(scan);
+      } catch { requestAnimationFrame(scan); }
+    };
+    requestAnimationFrame(scan);
+  }).catch(() => {
+    controls.ui.scannerOpen = false;
+    notice.textContent = "无法打开相机，请关闭扫描后使用昵称或人员编号搜索。";
+    box.innerHTML = '<p class="hint">无法打开相机。请改用上方的昵称或人员编号搜索。</p>';
+  });
+}
 function stopScanner(ui) { ui.scannerStream?.getTracks?.().forEach((track) => track.stop()); ui.scannerStream = null; }
+function closeScanner(ui) { stopScanner(ui); ui.scannerOpen = false; }

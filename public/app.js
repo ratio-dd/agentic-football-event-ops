@@ -79,6 +79,7 @@ const api = {
 };
 
 async function refresh() {
+  if (context.staffUi.scannerOpen) return;
   try {
     context.state = await request(context.staffSession ? "/api/ops/state" : "/api/state", { staff: Boolean(context.staffSession) });
     context.error = "";

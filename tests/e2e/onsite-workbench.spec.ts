@@ -36,6 +36,46 @@ test("Staff stays on the selected operational tab after polling refresh", async 
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
 });
 
+test("Staff sees an actionable QR result and can return to manual search", async ({ page, request }, testInfo) => {
+  const stamp = Date.now();
+  const response = await request.post("/api/participants", { data: { nickname: `扫码结果${stamp}` }, headers: { "x-client-id": `qr-result-${stamp}` } });
+  expect(response.ok()).toBeTruthy();
+  const participant = (await response.json()).participant;
+  await page.addInitScript((shortId) => {
+    let hasScanned = false;
+    class MockBarcodeDetector {
+      async detect() {
+        if (!hasScanned) { hasScanned = true; return [{ rawValue: shortId }]; }
+        return [];
+      }
+    }
+    Object.defineProperty(window, "BarcodeDetector", { configurable: true, value: MockBarcodeDetector });
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => new MediaStream() } });
+  }, participant.staffShortId);
+
+  await page.goto("/staff");
+  await page.getByLabel("Staff PIN").fill("meetup-staff");
+  await page.getByLabel("你的昵称").fill(`扫码验收 ${stamp}`);
+  await page.getByRole("button", { name: "进入工作台" }).click();
+  await page.getByRole("button", { name: "组队", exact: true }).click();
+  await page.getByRole("button", { name: "扫描参与者二维码" }).click();
+
+  await expect(page.getByText("扫描结果", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: participant.nickname })).toBeVisible();
+  await expect(page.locator(".scan-result")).toContainText(participant.staffShortId);
+  await expect(page.getByRole("button", { name: "选中并调度" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath("09-qr-result-mobile.png"), fullPage: false });
+
+  await page.getByRole("button", { name: "选中并调度" }).click();
+  await expect(page.getByText("已选择 1 / 3 人")).toBeVisible();
+  await page.getByRole("button", { name: "重新扫码" }).click();
+  await expect(page.getByRole("button", { name: "关闭扫描" })).toBeVisible();
+  await page.getByRole("button", { name: "关闭扫描" }).click();
+  await expect(page.locator(".scanner video")).toHaveCount(0);
+  await expect(page.getByLabel("查找人员")).toBeVisible();
+});
+
 test("participant can create a nameless team and receive only a team number", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("昵称", { exact: true }).fill(`自组体验员${Date.now()}`);
@@ -111,6 +151,7 @@ test("Staff can move people from either board and sees capacity before a batch d
   };
   const staff = await call("/api/ops/session", "POST", { staffPin: "meetup-staff", staffNickname: `调度 E2E ${stamp}` });
   const staffHeaders = { "x-staff-session": staff.staffSession };
+  await call("/api/ops/codes/import", "POST", { codes: [`e2e-code-${stamp}`] }, staffHeaders);
   const people = [];
   for (let index = 1; index <= 5; index += 1) people.push((await call("/api/participants", "POST", { nickname: `调度体验${stamp}-${index}` }, { "x-client-id": `dispatch-e2e-${stamp}-${index}` })).participant);
   const teamA = (await call("/api/ops/teams", "POST", { memberIds: [people[0].id] }, staffHeaders)).team;
