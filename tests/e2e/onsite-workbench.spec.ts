@@ -129,7 +129,7 @@ test("Staff can move people from either board and sees capacity before a batch d
   await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeEnabled();
   await page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`).click();
   await expect(page.getByRole("heading", { name: `确认加入 ${teamB.teamNumber}` })).toBeVisible();
-  await page.getByRole("button", { name: "确认执行" }).click();
+  await page.getByRole("button", { name: "确认加入队伍" }).click();
   await expect(page.getByText("人员与队伍关系已更新。")).toBeVisible();
 
   const moved = await call("/api/ops/state", "GET", undefined, staffHeaders);
