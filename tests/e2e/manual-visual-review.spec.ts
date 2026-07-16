@@ -126,6 +126,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await capture(page, testInfo, "15-admin-activity");
 
     await page.setViewportSize({ width: 1440, height: 900 });
+    await capture(page, testInfo, "15a-admin-desktop");
     await page.goto("/display");
     await expect(page.getByRole("heading", { name: "A 组积分榜" })).toBeVisible();
     await capture(page, testInfo, "16-public-display");

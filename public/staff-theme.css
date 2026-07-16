@@ -69,7 +69,7 @@
 .staff-login-ticket .stack { gap: 13px; margin-top: 24px; }
 .staff-login-ticket label { color: var(--ops-charcoal); font-size: 13px; font-weight: 850; }
 .staff-login-ticket input { min-height: 47px; border: 2px solid var(--ops-charcoal); border-radius: 8px; background: rgba(255,255,255,.82); color: var(--ops-charcoal); }
-.staff-login-ticket input:focus { border-color: var(--ops-green); outline: 3px solid color-mix(in srgb, var(--af-sky, #5db7ff) 55%, transparent); outline-offset: 1px; }
+.staff-login-ticket input:focus { border-color: var(--ops-green); outline: 3px solid var(--ops-ink); outline-offset: 1px; }
 .staff-login-hint { margin: -3px 0 2px; color: #627065; font-size: 12px; }
 .staff-login-ticket button { display: flex; align-items: center; justify-content: space-between; min-height: 50px; padding: 0 16px; border: 2px solid var(--ops-charcoal); border-radius: 8px; background: linear-gradient(135deg, var(--ops-ink), var(--ops-green)); box-shadow: 2px 2px 0 var(--ops-charcoal); color: #fffdf2; font-weight: 900; }
 .staff-login-ticket button span { font-size: 22px; line-height: 1; }
@@ -237,10 +237,10 @@
 
 .staff-shell button:hover:not(:disabled),
 .staff-shell .display-link:hover,
-.staff-shell button:focus-visible,
+.staff-shell button:focus-visible:not(:disabled),
 .staff-shell .display-link:focus-visible {
   background: var(--ops-ink);
-  outline: 3px solid color-mix(in srgb, var(--ops-sky) 78%, white);
+  outline: 3px solid var(--ops-ink);
   outline-offset: 2px;
 }
 
@@ -250,12 +250,46 @@
   box-shadow: none;
 }
 
+.staff-shell .text-button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+}
+
+.staff-shell .text-button:hover,
+.staff-shell .text-button:focus-visible {
+  background: rgba(255, 253, 242, .12);
+  box-shadow: none;
+  color: inherit;
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
+}
+
+.staff-shell .text-button:focus-visible {
+  background: var(--ops-cream);
+  color: var(--ops-ink);
+}
+
 .staff-shell .secondary,
 .staff-shell .filter-row button,
 .staff-shell .selection-tray .secondary,
 .staff-shell .dispatch-modal .secondary {
   background: #fffdf5;
   color: var(--ops-ink);
+}
+
+/* Secondary controls and selectable rows are not primary actions. Keep their
+   paper surface and dark text on hover/focus instead of inheriting the solid
+   green button treatment above. */
+.staff-shell .secondary:hover:not(:disabled),
+.staff-shell .secondary:focus-visible,
+.staff-shell .filter-row button:hover:not(:disabled),
+.staff-shell .filter-row button:focus-visible {
+  background: #f2ecd9;
+  color: var(--ops-ink);
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
 }
 
 .staff-shell .filter-row button.active,
@@ -306,6 +340,19 @@
 .staff-shell .team-picker-list button {
   border-width: 2px;
   border-color: var(--ops-ink);
+  color: var(--ops-ink);
+}
+
+.staff-shell .dispatch-person-row strong,
+.staff-shell .team-board-card strong,
+.staff-shell .team-picker-list button strong {
+  color: var(--ops-ink);
+}
+
+.staff-shell .dispatch-person-row small,
+.staff-shell .team-board-card small,
+.staff-shell .team-picker-list button small {
+  color: var(--ops-muted);
 }
 
 .staff-shell .dispatch-person-row:hover,
@@ -314,11 +361,36 @@
   background: #f6efd8;
 }
 
+.staff-shell .dispatch-person-row:focus-visible,
+.staff-shell .team-board-card:focus-visible,
+.staff-shell .team-picker-list button:focus-visible:not(:disabled) {
+  background: #f6efd8;
+  color: var(--ops-ink);
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
+}
+
 .staff-shell .dispatch-person-row.is-selected {
   border-color: var(--ops-green);
-  background: #e8f1d9;
+  background: #e2f3e7;
   box-shadow: inset 5px 0 0 var(--ops-green);
 }
+
+.staff-shell .dispatch-person-row.is-selected strong,
+.staff-shell .dispatch-person-row.is-selected small { color: var(--ops-ink); }
+
+.staff-shell .team-picker-list button:disabled {
+  border-color: #a9b7ad;
+  background: #eff1ed;
+  color: var(--ops-muted);
+  opacity: 1;
+}
+
+.staff-shell .team-picker-list button:disabled strong,
+.staff-shell .team-picker-list button:disabled small,
+.staff-shell .team-picker-list button:disabled .team-picker-meta em { color: var(--ops-muted); }
+
+.staff-shell .team-picker-list button:disabled:focus-visible { outline: none; }
 
 .staff-shell .team-board-card em,
 .staff-shell .dispatch-check,
@@ -347,7 +419,7 @@
 .staff-shell select:focus,
 .staff-shell textarea:focus {
   border-color: var(--ops-green);
-  outline: 3px solid color-mix(in srgb, var(--ops-sky) 55%, transparent);
+  outline: 3px solid var(--ops-ink);
   outline-offset: 1px;
 }
 
@@ -546,7 +618,7 @@
 
 .admin-shell .admin-form input:focus,
 .admin-shell .admin-form select:focus,
-.admin-shell .admin-form textarea:focus { border-color: var(--ops-green); outline: 3px solid color-mix(in srgb, var(--ops-sky) 55%, transparent); outline-offset: 1px; }
+.admin-shell .admin-form textarea:focus { border-color: var(--ops-green); outline: 3px solid var(--ops-ink); outline-offset: 1px; }
 
 .admin-shell .admin-form button,
 .admin-shell .admin-list button,

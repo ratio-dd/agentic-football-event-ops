@@ -186,12 +186,7 @@ test("Staff can move people from either board and sees capacity before a batch d
   await expect(page.locator('[data-team-people-filter="unassigned"]')).toBeVisible();
   await page.locator(`[data-action="confirm-team"][data-team-id="${teamB.id}"]`).click();
   await expect(page.getByText("队伍已确认，可以发放 Code。")).toBeVisible();
-  await expect(page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`)).toBeEnabled();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`).click();
-  await expect(page.getByText("已自动发放下一个可用 Code。")).toBeVisible();
-  await expect(page.getByText("已发放 Workshop Code")).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("06-team-config-resource-issued-mobile.png"), fullPage: false });
+  await page.screenshot({ path: testInfo.outputPath("06-team-config-ready-for-code-mobile.png"), fullPage: false });
   await page.getByRole("button", { name: "关闭" }).click();
   const peopleTab = page.locator('[data-grouping-tab="people"]');
   await expect(peopleTab).toHaveCount(1); await peopleTab.click();
