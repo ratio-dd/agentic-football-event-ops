@@ -47,11 +47,20 @@ test("participant can create a nameless team and receive only a team number", as
   await expect(page.getByText("队长", { exact: true })).toHaveCount(0);
 });
 
-test("Staff sees the new-team confirmation as an explicit second step", async ({ page, request }) => {
+test("Staff creates a new team with one final confirmation and immediate pending feedback", async ({ page, request }) => {
   const stamp = Date.now();
   const participantResponse = await request.post("/api/participants", { data: { nickname: `新队确认${stamp}` }, headers: { "x-client-id": `new-team-confirm-${stamp}` } });
   expect(participantResponse.ok()).toBeTruthy();
   const participant = (await participantResponse.json()).participant;
+  const stateSessionResponse = await request.post("/api/ops/session", { data: { staffPin: "meetup-staff", staffNickname: `新队断言 ${stamp}` } });
+  expect(stateSessionResponse.ok()).toBeTruthy();
+  const stateSession = (await stateSessionResponse.json()).staffSession;
+  let assignmentRequests = 0;
+  await page.route("**/api/ops/assignments", async (route) => {
+    assignmentRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
 
   await page.goto("/staff");
   await page.getByLabel("Staff PIN").fill("meetup-staff");
@@ -62,7 +71,19 @@ test("Staff sees the new-team confirmation as an explicit second step", async ({
   await page.locator(`[data-person-id="${participant.id}"]`).click();
   await page.getByRole("button", { name: "下一步：确认新队" }).click();
   await expect(page.getByRole("heading", { name: "确认组成新队" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "确认创建队伍" })).toBeVisible();
+  const confirm = page.getByRole("button", { name: "确认创建队伍" });
+  await expect(confirm).toBeVisible();
+  await confirm.click();
+  await expect(page.getByRole("button", { name: "正在创建队伍…" })).toBeDisabled();
+  await expect(page.getByText("人员与队伍关系已更新。")).toBeVisible();
+  expect(assignmentRequests).toBe(1);
+
+  const stateResponse = await request.get("/api/ops/state", { headers: { "x-staff-session": stateSession } });
+  expect(stateResponse.ok()).toBeTruthy();
+  const state = await stateResponse.json();
+  const createdTeam = state.teams.find((team: any) => team.memberIds.includes(participant.id));
+  expect(createdTeam).toBeTruthy();
+  expect(createdTeam.memberIds).toEqual([participant.id]);
 });
 
 test("public display is readable without Staff controls", async ({ page }) => {

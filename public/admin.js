@@ -9,7 +9,24 @@ export function renderStaff(root, state, api, controls) {
   const content = { overview: overview(state, teams, qualified, controls.ui), grouping: grouping(state, controls.ui), codes: codeTab(state, teams), ta: taTab(state, teams, controls.ui), competition: competition(state, teams, controls.ui), audit: auditTab(state.auditLog || [], controls.ui) }[tab];
   root.innerHTML = `<div class="staff-shell"><header class="staff-top"><div><strong>⚽ 现场运营台</strong><small>${e(state.event?.name || "北京 MeetUp")}</small></div><button class="text-button" data-action="logout">退出</button></header><p class="notice" aria-live="polite"></p><main>${content}</main><nav class="bottom-tabs"><button data-tab="overview" class="${tab === "overview" ? "active" : ""}">总览</button><button data-tab="grouping" class="${tab === "grouping" ? "active" : ""}">组队</button><button data-tab="codes" class="${tab === "codes" ? "active" : ""}">Code</button><button data-tab="ta" class="${tab === "ta" ? "active" : ""}">TA</button><button data-tab="competition" class="${tab === "competition" ? "active" : ""}">比赛</button><button data-tab="audit" class="${tab === "audit" ? "active" : ""}">记录</button></nav></div>`;
   controls.ui.staffEventAbort?.abort(); const staffEventAbort = new AbortController(); controls.ui.staffEventAbort = staffEventAbort;
-  const notice = root.querySelector(".notice"); const action = async (fn, ok) => { try { await fn(); await controls.refresh(); const refreshedNotice = document.querySelector(".notice"); if (refreshedNotice) refreshedNotice.textContent = ok; } catch (error) { notice.textContent = error.message; } };
+  const notice = root.querySelector(".notice"); const action = async (fn, ok, trigger, pendingLabel = "正在保存…") => {
+    if (controls.ui.actionPending) return;
+    controls.ui.actionPending = true;
+    controls.ui.pendingActionLabel = pendingLabel;
+    const originalLabel = trigger?.textContent;
+    if (trigger) { trigger.disabled = true; trigger.setAttribute("aria-busy", "true"); trigger.textContent = pendingLabel; }
+    try {
+      await fn();
+      await controls.refresh();
+      const refreshedNotice = document.querySelector(".notice"); if (refreshedNotice) refreshedNotice.textContent = ok;
+    } catch (error) {
+      notice.textContent = error.message;
+    } finally {
+      controls.ui.actionPending = false;
+      controls.ui.pendingActionLabel = "";
+      if (trigger?.isConnected) { trigger.disabled = false; trigger.removeAttribute("aria-busy"); trigger.textContent = originalLabel; }
+    }
+  };
   root.addEventListener("click", (event) => {
     const button = event.target.closest("button"); if (!button) return;
     if (button.dataset.tab) { controls.ui.tab = button.dataset.tab; renderStaff(root, state, api, controls); return; }
@@ -29,7 +46,7 @@ export function renderStaff(root, state, api, controls) {
     if (button.dataset.action === "choose-team") { queueAssignment(state, controls.ui, button.dataset.teamId); controls.ui.teamPickerOpen = false; return renderStaff(root, state, api, controls); }
     if (button.dataset.action === "remove-selected") { if (!(controls.ui.selectedPersonIds || []).length) return; queueAssignment(state, controls.ui, ""); return renderStaff(root, state, api, controls); }
     if (button.dataset.action === "close-assignment") { controls.ui.pendingAssignment = null; controls.ui.dissolutionActions = {}; return renderStaff(root, state, api, controls); }
-    if (button.dataset.action === "confirm-assignment") { const pending = controls.ui.pendingAssignment; if (!pending) return; return action(() => api.dispatchPeople(pending.participantIds, pending.targetTeamId, controls.ui.dissolutionActions || {}), "人员与队伍关系已更新。").then(() => { controls.ui.selectedPersonIds = []; controls.ui.pendingAssignment = null; controls.ui.dissolutionActions = {}; controls.ui.teamConfigId = null; }); }
+    if (button.dataset.action === "confirm-assignment") { const pending = controls.ui.pendingAssignment; if (!pending) return; const pendingLabel = pending.targetTeamId === "new" ? "正在创建队伍…" : pending.targetTeamId ? "正在加入队伍…" : "正在移出队伍…"; return action(() => api.dispatchPeople(pending.participantIds, pending.targetTeamId, controls.ui.dissolutionActions || {}), "人员与队伍关系已更新。", button, pendingLabel).then(() => { controls.ui.selectedPersonIds = []; controls.ui.pendingAssignment = null; controls.ui.dissolutionActions = {}; controls.ui.teamConfigId = null; }); }
     if (button.dataset.action === "open-team-config") { controls.ui.teamConfigId = button.dataset.teamId; controls.ui.selectedPersonIds = []; return renderStaff(root, state, api, controls); }
     if (button.dataset.action === "close-team-config") { controls.ui.teamConfigId = null; controls.ui.selectedPersonIds = []; return renderStaff(root, state, api, controls); }
     if (button.dataset.action === "team-add-selected") { if (!(controls.ui.selectedPersonIds || []).length) return; queueAssignment(state, controls.ui, button.dataset.teamId); return renderStaff(root, state, api, controls); }
@@ -124,7 +141,8 @@ function teamPicker(state, ui) {
 function assignmentConfirm(state, ui) {
   const pending = ui.pendingAssignment; const people = pending.participantIds.map((id) => state.participants.find((person) => person.id === id)).filter(Boolean); const target = pending.targetTeamId === "new" ? null : teamById(state, pending.targetTeamId); const heading = pending.targetTeamId === "new" ? "确认组成新队" : target ? `确认加入 ${target.teamNumber}` : "确认移出队伍"; const empties = (pending.emptyTeamIds || []).map((id) => teamById(state, id)).filter(Boolean);
   const commitLabel = pending.targetTeamId === "new" ? "确认创建队伍" : pending.targetTeamId ? "确认加入队伍" : "确认移出队伍";
-  return `<div class="modal-backdrop"><section class="dispatch-modal commit-modal" role="dialog" aria-modal="true" aria-label="确认人员调度"><div class="modal-header"><div><p class="modal-kicker">最后确认</p><h2>${heading}</h2><p>这一步会真正更新现场数据。</p></div><button data-action="close-assignment" class="text-button">取消</button></div><div class="modal-selection-summary"><strong>涉及人员</strong><span>${people.map((person) => `${e(person.nickname)} · ${e(person.staffShortId)}`).join("、")}</span></div>${target ? `<div class="modal-target-summary"><strong>目标队伍</strong><span>${e(target.teamNumber)} · 执行后 ${targetCapacity(state, target, people.map((person) => person.id))} / 3 人</span></div>` : ""}${empties.length ? `<div class="dissolution-list"><h3>以下队伍会因移走最后一名成员而解散</h3><p>已关联 Code 的队伍请根据现场情况选择保留或回收。</p>${empties.map((team) => `<label>${e(team.teamNumber)}${team.workshopCodeId ? " · 已关联 Code" : ""}<select data-dissolution-team="${e(team.id)}">${team.workshopCodeId ? `<option value="keep" ${(ui.dissolutionActions || {})[team.id] === "keep" ? "selected" : ""}>保留 Code 为已消耗</option><option value="reclaim" ${(ui.dissolutionActions || {})[team.id] === "reclaim" ? "selected" : ""}>回收 Code 至可发放池</option>` : '<option value="dissolve">解散（未发放 Code）</option>'}</select></label>`).join("")}</div>` : '<p class="modal-safe-note">不会解散其他队伍。</p>'}<button data-action="confirm-assignment" class="confirm-dispatch">${commitLabel}</button></section></div>`;
+  const pendingLabel = ui.actionPending ? (ui.pendingActionLabel || "正在保存…") : commitLabel;
+  return `<div class="modal-backdrop"><section class="dispatch-modal commit-modal" role="dialog" aria-modal="true" aria-label="确认人员调度"><div class="modal-header"><div><p class="modal-kicker">最后确认</p><h2>${heading}</h2><p>这一步会真正更新现场数据。</p></div><button data-action="close-assignment" class="text-button" ${ui.actionPending ? "disabled" : ""}>取消</button></div><div class="modal-selection-summary"><strong>涉及人员</strong><span>${people.map((person) => `${e(person.nickname)} · ${e(person.staffShortId)}`).join("、")}</span></div>${target ? `<div class="modal-target-summary"><strong>目标队伍</strong><span>${e(target.teamNumber)} · 执行后 ${targetCapacity(state, target, people.map((person) => person.id))} / 3 人</span></div>` : ""}${empties.length ? `<div class="dissolution-list"><h3>以下队伍会因移走最后一名成员而解散</h3><p>已关联 Code 的队伍请根据现场情况选择保留或回收。</p>${empties.map((team) => `<label>${e(team.teamNumber)}${team.workshopCodeId ? " · 已关联 Code" : ""}<select data-dissolution-team="${e(team.id)}" ${ui.actionPending ? "disabled" : ""}>${team.workshopCodeId ? `<option value="keep" ${(ui.dissolutionActions || {})[team.id] === "keep" ? "selected" : ""}>保留 Code 为已消耗</option><option value="reclaim" ${(ui.dissolutionActions || {})[team.id] === "reclaim" ? "selected" : ""}>回收 Code 至可发放池</option>` : '<option value="dissolve">解散（未发放 Code）</option>'}</select></label>`).join("")}</div>` : '<p class="modal-safe-note">不会解散其他队伍。</p>'}<button data-action="confirm-assignment" class="confirm-dispatch" ${ui.actionPending ? "disabled aria-busy=\"true\"" : ""}>${pendingLabel}</button></section></div>`;
 }
 function teamConfig(state, ui) {
   const team = teamById(state, ui.teamConfigId); if (!team) return "";
