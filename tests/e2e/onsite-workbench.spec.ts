@@ -15,24 +15,19 @@ test("参与者问卷在自动刷新后保留尚未提交的选择", async ({ pa
   await expect(page.getByLabel("是否做过 AWS Workshop")).toHaveValue("yes");
 });
 
-test("Staff stays on the selected operational tab after polling refresh", async ({ page }) => {
+test("Staff stays on the selected daily-work tab after polling refresh", async ({ page }) => {
   await page.goto("/staff");
   await page.getByLabel("Staff PIN").fill("meetup-staff");
   await page.getByLabel("你的昵称").fill("E2E TA");
   await page.getByRole("button", { name: "进入工作台" }).click();
 
-  await page.locator(".event-gates summary").click();
-  await expect(page.locator("#event-gates")).toBeVisible();
-  await page.waitForTimeout(5_500);
-  await expect(page.locator(".event-gates")).toHaveAttribute("open", "");
-
-  await page.getByRole("button", { name: "Code", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "导入、库存与发放记录" })).toBeVisible();
+  await page.getByRole("button", { name: "Workshop", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "发放资源，核验练习赛" })).toBeVisible();
 
   await page.waitForTimeout(5_500);
 
-  await expect(page.getByRole("button", { name: "Code", exact: true })).toHaveClass(/active/);
-  await expect(page.getByRole("heading", { name: "导入、库存与发放记录" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workshop", exact: true })).toHaveClass(/active/);
+  await expect(page.getByRole("heading", { name: "发放资源，核验练习赛" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
 });
 
@@ -114,7 +109,6 @@ test("Staff creates a new team with one final confirmation and immediate pending
   const confirm = page.getByRole("button", { name: "确认创建队伍" });
   await expect(confirm).toBeVisible();
   await confirm.click();
-  await expect(page.getByRole("button", { name: "正在创建队伍…" })).toBeDisabled();
   await expect(page.getByText("人员与队伍关系已更新。")).toBeVisible();
   expect(assignmentRequests).toBe(1);
 
@@ -133,14 +127,20 @@ test("public display is readable without Staff controls", async ({ page }) => {
   await expect(page.getByText("Staff PIN")).toHaveCount(0);
 });
 
-test("Staff can open the operation record tab without changing session", async ({ page }) => {
+test("Staff can elevate to Admin from the More menu without a second Staff login", async ({ page }) => {
   await page.goto("/staff");
   await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill("E2E 记录员");
+  await page.getByLabel("你的昵称").fill("E2E 管理员");
   await page.getByRole("button", { name: "进入工作台" }).click();
-  await page.getByRole("button", { name: "记录", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "现场变更可追溯" })).toBeVisible();
-  await expect(page.getByText("E2E 记录员").first()).toBeVisible();
+  await page.getByRole("button", { name: "更多", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "进入管理后台" })).toBeVisible();
+  await page.getByLabel("Admin PIN").fill("meetup-admin");
+  await page.getByRole("button", { name: "进入管理后台" }).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "管理例外，不干扰现场" })).toBeVisible();
+  await page.getByRole("button", { name: "返回 Staff" }).click();
+  await expect(page).toHaveURL(/\/staff$/);
+  await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toBeVisible();
 });
 
 test("Staff can move people from either board and sees capacity before a batch dispatch", async ({ page, request }, testInfo) => {
@@ -151,7 +151,6 @@ test("Staff can move people from either board and sees capacity before a batch d
   };
   const staff = await call("/api/ops/session", "POST", { staffPin: "meetup-staff", staffNickname: `调度 E2E ${stamp}` });
   const staffHeaders = { "x-staff-session": staff.staffSession };
-  await call("/api/ops/codes/import", "POST", { codes: [`e2e-code-${stamp}`] }, staffHeaders);
   const people = [];
   for (let index = 1; index <= 5; index += 1) people.push((await call("/api/participants", "POST", { nickname: `调度体验${stamp}-${index}` }, { "x-client-id": `dispatch-e2e-${stamp}-${index}` })).participant);
   const teamA = (await call("/api/ops/teams", "POST", { memberIds: [people[0].id] }, staffHeaders)).team;
@@ -185,6 +184,8 @@ test("Staff can move people from either board and sees capacity before a batch d
   await expect(page.getByRole("heading", { name: teamB.teamNumber, exact: true })).toBeVisible();
   await expect(page.locator(`[data-person-id="${people[3].id}"]`)).toBeVisible();
   await expect(page.locator('[data-team-people-filter="unassigned"]')).toBeVisible();
+  await page.locator(`[data-action="confirm-team"][data-team-id="${teamB.id}"]`).click();
+  await expect(page.getByText("队伍已确认，可以发放 Code。")).toBeVisible();
   await expect(page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`)).toBeEnabled();
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`).click();

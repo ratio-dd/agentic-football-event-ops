@@ -1,19 +1,24 @@
 import { renderParticipant } from "./participant.js";
 import { renderStaff } from "./admin.js";
+import { renderAdmin } from "./admin-panel.js";
 
 const CLIENT_KEY = "afc-event-ops-client";
 const STAFF_KEY = "afc-event-ops-staff";
+const ADMIN_KEY = "afc-event-ops-admin";
 const app = document.querySelector("#app");
 const context = {
   clientId: localStorage.getItem(CLIENT_KEY) || crypto.randomUUID(),
   staffSession: sessionStorage.getItem(STAFF_KEY) || "",
+  adminSession: sessionStorage.getItem(ADMIN_KEY) || "",
   state: null,
   error: "",
   // Polling keeps the on-site view current. Keep any unfinished input local so
   // a background refresh never sends a staff member or participant back to a
   // form's default option.
   formDraft: new Map(),
+  feedbackOpen: false,
   staffUi: { tab: "overview", groupQuery: "", searchResults: [], selectedMemberIds: [], auditFilter: "all" },
+  adminUi: { section: "activity" },
 };
 localStorage.setItem(CLIENT_KEY, context.clientId);
 
@@ -38,11 +43,11 @@ function restoreDrafts(root) {
 app.addEventListener("input", saveDraft);
 app.addEventListener("change", saveDraft);
 
-async function request(path, { method = "GET", body, staff = false, adminPin = "" } = {}) {
+async function request(path, { method = "GET", body, staff = false } = {}) {
   const headers = { "x-client-id": context.clientId };
   if (body !== undefined) headers["content-type"] = "application/json";
   if (staff && context.staffSession) headers["x-staff-session"] = context.staffSession;
-  if (adminPin) headers["x-admin-pin"] = adminPin;
+  if (context.adminSession) headers["x-admin-session"] = context.adminSession;
   const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "操作未完成，请重试");
@@ -55,45 +60,57 @@ const api = {
   rebind: (payload) => request("/api/participants/rebind", { method: "POST", body: payload }),
   createSelfTeam: () => request("/api/teams/self", { method: "POST", body: {} }),
   joinSelfTeam: (teamNumber) => request("/api/teams/self/join", { method: "POST", body: { teamNumber } }),
+  submitFeedback: (note) => request("/api/feedback", { method: "POST", body: { note, page: location.pathname }, staff: Boolean(context.staffSession) }),
   staffLogin: (payload) => request("/api/ops/session", { method: "POST", body: payload }),
+  adminLogin: (adminPin) => request("/api/admin/session", { method: "POST", body: { adminPin }, staff: true }),
   searchParticipants: (query) => request(`/api/ops/participants?q=${encodeURIComponent(query)}`, { staff: true }),
   createTeam: (memberIds) => request("/api/ops/teams", { method: "POST", body: { memberIds }, staff: true }),
   dispatchPeople: (participantIds, targetTeamId, dissolutionActions = {}) => request("/api/ops/assignments", { method: "POST", body: { participantIds, targetTeamId, dissolutionActions }, staff: true }),
   updateTeam: (teamId, memberIds) => request(`/api/ops/teams/${teamId}/members`, { method: "PUT", body: { memberIds }, staff: true }),
   removeTeam: (teamId) => request(`/api/ops/teams/${teamId}`, { method: "DELETE", body: {}, staff: true }),
   confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
-  updateEventGates: (gates, adminPin) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true, adminPin }),
+  updateEventGates: (gates) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true }),
   importWorkshopCodes: (codes) => request("/api/ops/codes/import", { method: "POST", body: { codes }, staff: true }),
-  setWorkshopLink: (url) => request("/api/ops/workshop-link", { method: "PUT", body: { url }, staff: true }),
+  setEventLinks: (workshopUrl, gamePortalUrl) => request("/api/ops/event-links", { method: "PUT", body: { workshopUrl, gamePortalUrl }, staff: true }),
+  reclaimCode: (teamId) => request(`/api/admin/teams/${teamId}/reclaim-code`, { method: "POST", body: {}, staff: true }),
   issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
-  workshopStatus: (teamId, status, note = "") => request(`/api/ops/workshop/teams/${teamId}/status`, { method: "PUT", body: { status, note }, staff: true }),
+  workshopNote: (teamId, note = "") => request(`/api/ops/workshop/teams/${teamId}/note`, { method: "PUT", body: { note }, staff: true }),
   qualify: (teamId) => request(`/api/ops/qualification/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
-  revokeQualification: (teamId, note, adminPin) => request(`/api/ops/qualification/teams/${teamId}/revoke`, { method: "POST", body: { note }, staff: true, adminPin }),
-  freezeCompetition: (teamIds, adminPin) => request("/api/ops/competition/freeze", { method: "POST", body: { teamIds }, staff: true, adminPin }),
-  unfreezeCompetition: (adminPin) => request("/api/ops/competition/unfreeze", { method: "POST", body: {}, staff: true, adminPin }),
-  tournament: (groupCount, qualifiersPerGroup, adminPin) => request("/api/ops/competition/generate", { method: "POST", body: { groupCount, qualifiersPerGroup }, staff: true, adminPin }),
-  swapTournamentTeams: (firstTeamId, secondTeamId, adminPin) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true, adminPin }),
-  generateKnockout: (adminPin) => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true, adminPin }),
-  voidTournament: (reason, adminPin) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true, adminPin }),
-  result: (matchId, scoreA, scoreB, adminPin) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true, adminPin }),
+  revokeQualification: (teamId, note) => request(`/api/ops/qualification/teams/${teamId}/revoke`, { method: "POST", body: { note }, staff: true }),
+  freezeCompetition: (teamIds) => request("/api/ops/competition/freeze", { method: "POST", body: { teamIds }, staff: true }),
+  unfreezeCompetition: () => request("/api/ops/competition/unfreeze", { method: "POST", body: {}, staff: true }),
+  tournament: (groupCount, qualifiersPerGroup) => request("/api/ops/competition/generate", { method: "POST", body: { groupCount, qualifiersPerGroup }, staff: true }),
+  swapTournamentTeams: (firstTeamId, secondTeamId) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true }),
+  generateKnockout: () => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true }),
+  voidTournament: (reason) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true }),
+  result: (matchId, scoreA, scoreB) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true }),
 };
 
 async function refresh() {
   if (context.staffUi.scannerOpen) return;
   try {
-    context.state = await request(context.staffSession ? "/api/ops/state" : "/api/state", { staff: Boolean(context.staffSession) });
+    const statePath = location.pathname === "/admin" && context.adminSession ? "/api/admin/state" : context.staffSession ? "/api/ops/state" : "/api/state";
+    context.state = await request(statePath, { staff: Boolean(context.staffSession) });
     context.error = "";
   } catch (error) { context.error = error.message || "暂时无法加载活动数据"; }
   render();
 }
 async function login(payload) { const result = await api.staffLogin(payload); context.staffSession = result.staffSession; sessionStorage.setItem(STAFF_KEY, result.staffSession); await refresh(); }
+async function loginAdmin(adminPin) { const result = await api.adminLogin(adminPin); context.adminSession = result.adminSession; sessionStorage.setItem(ADMIN_KEY, result.adminSession); history.pushState({}, "", "/admin"); await refresh(); }
 function render() {
   if (!context.state) { app.innerHTML = `<main class="loading-screen"><p>${context.error || "正在加载 Agentic Football 现场运营台…"}</p></main>`; return; }
   const surface = document.createElement("main"); surface.className = "app-surface"; app.replaceChildren(surface);
   const rerender = async () => refresh();
-  if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, refresh: rerender, ui: context.staffUi, logout: () => { sessionStorage.removeItem(STAFF_KEY); context.staffSession = ""; refresh(); } });
+  const logout = () => { sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = ""; history.pushState({}, "", "/"); refresh(); };
+  if (location.pathname === "/admin") renderAdmin(surface, context.state, api, { refresh: rerender, ui: context.adminUi, hasAdmin: Boolean(context.adminSession), returnToStaff: () => { history.pushState({}, "", "/staff"); refresh(); } });
+  else if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), logout });
   else renderParticipant(surface, context.state, api, rerender);
+  if (context.feedbackOpen) surface.insertAdjacentHTML("beforeend", feedbackModal());
   restoreDrafts(surface);
 }
+function feedbackModal() { return `<div class="modal-backdrop feedback-backdrop"><section class="dispatch-modal feedback-modal" role="dialog" aria-modal="true" aria-label="提交反馈"><div class="modal-header"><div><p class="modal-kicker">Feedback</p><h2>留下反馈</h2><p>会自动附带当前页面和登录状态。</p></div><button type="button" class="text-button" data-feedback-close>关闭</button></div><form id="feedback-form" class="stack"><label>你的反馈<textarea name="note" rows="4" maxlength="800" required placeholder="你看到的问题、建议或现场情况"></textarea></label><button>提交反馈</button></form></section></div>`; }
+app.addEventListener("click", (event) => { const button = event.target.closest("button"); if (!button) return; if (button.dataset.feedback !== undefined) { context.feedbackOpen = true; render(); } if (button.dataset.feedbackClose !== undefined) { context.feedbackOpen = false; render(); } });
+app.addEventListener("submit", async (event) => { const form = event.target; if (!(form instanceof HTMLFormElement) || form.id !== "feedback-form") return; event.preventDefault(); const button = form.querySelector("button"); if (button) button.disabled = true; try { await api.submitFeedback(new FormData(form).get("note")); context.feedbackOpen = false; await refresh(); } catch (error) { const notice = form.closest(".app-surface")?.querySelector(".notice"); if (notice) notice.textContent = error.message; else window.alert(error.message); } finally { if (button) button.disabled = false; } });
+window.addEventListener("popstate", refresh);
 refresh();
 window.setInterval(refresh, 5000);
