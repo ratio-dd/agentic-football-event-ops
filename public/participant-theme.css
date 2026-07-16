@@ -51,10 +51,6 @@
   box-shadow: 4px 4px 0 var(--ticket-ink);
   isolation: isolate;
 }
-.participant-experience .participant-ticket::before,
-.participant-experience .participant-ticket::after { position: absolute; z-index: -1; width: 12px; top: 12px; bottom: 12px; content: ""; background: radial-gradient(circle at 0 7px, var(--ticket-ivory) 0 5px, transparent 5.5px) 0 0 / 12px 14px repeat-y; }
-.participant-experience .participant-ticket::before { left: -2px; transform: translateX(-1px); }
-.participant-experience .participant-ticket::after { right: -2px; transform: rotate(180deg) translateX(-1px); }
 .participant-experience .participant-ticket h1 { margin: 0; color: var(--ticket-green); font-size: clamp(30px, 8vw, 44px); letter-spacing: -.065em; }
 .participant-experience .participant-ticket h2 { margin: 0; color: var(--ticket-green); font-size: 23px; letter-spacing: -.05em; }
 .participant-experience .participant-ticket p { color: #526055; line-height: 1.55; }
@@ -104,8 +100,6 @@
 .participant-experience .waiting-icon { display: grid; width: 44px; height: 44px; place-items: center; margin: 0 auto 10px; border-radius: 50%; background: var(--ticket-emerald); color: #fff; font-size: 22px; }
 .participant-experience .participant-waiting p { margin: 7px 0 0; font-size: 14px; }
 .participant-experience .participant-team-card { overflow: hidden; background: radial-gradient(circle at 88% 18%, rgba(93,183,255,.75) 0 2px, transparent 3px), radial-gradient(circle at 92% 30%, rgba(255,122,0,.7) 0 3px, transparent 4px), linear-gradient(130deg, var(--ticket-green), var(--ticket-emerald)); color: #fff; }
-.participant-experience .participant-team-card::before,
-.participant-experience .participant-team-card::after { background: radial-gradient(circle at 0 7px, var(--ticket-green) 0 5px, transparent 5.5px) 0 0 / 12px 14px repeat-y; }
 .participant-experience .participant-team-card .ticket-kicker,
 .participant-experience .participant-team-card .ticket-label { color: rgba(255,255,255,.78); }
 .participant-experience .team-ticket-number { margin: 2px 0 14px; color: #fff9d5; font-size: clamp(43px, 13vw, 70px); line-height: .9; text-shadow: 3px 3px 0 var(--ticket-ink), 5px 5px 0 rgba(255,224,138,.8); }
