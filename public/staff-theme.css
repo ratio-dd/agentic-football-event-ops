@@ -138,6 +138,8 @@
 .staff-shell .staff-top .text-button:focus-visible {
   border-color: rgba(255, 253, 242, .7);
   background: rgba(255, 253, 242, .1);
+  color: #fffdf2;
+  outline-color: var(--ops-cream);
 }
 
 .staff-shell main { padding: 20px 0 0; }
@@ -221,16 +223,16 @@
 .staff-shell .next-action h2 { margin: 0; font-size: 21px; }
 .staff-shell .next-action p { margin: 5px 0 14px; opacity: .78; }
 
+/* Safe default: a newly added Staff button must stay a paper control until it
+   deliberately opts into a primary action context below. This prevents a
+   generic green hover from ever pairing with a component's dark text. */
 .staff-shell button,
-.staff-shell .display-link,
-.staff-shell .compact-list button,
-.staff-shell .selection-tray button,
-.staff-shell .dispatch-modal section > button {
+.staff-shell .display-link {
   border: 2px solid var(--ops-ink);
   border-radius: 4px;
-  background: var(--ops-green);
+  background: #fffdf5;
   box-shadow: 2px 2px 0 var(--ops-ink);
-  color: #fffdf2;
+  color: var(--ops-ink);
   font-weight: 800;
   transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
 }
@@ -239,9 +241,55 @@
 .staff-shell .display-link:hover,
 .staff-shell button:focus-visible:not(:disabled),
 .staff-shell .display-link:focus-visible {
-  background: var(--ops-ink);
+  background: #f2ecd9;
+  color: var(--ops-ink);
   outline: 3px solid var(--ops-ink);
   outline-offset: 2px;
+}
+
+/* The few solid controls are scoped by the operational region that owns the
+   mutation. Everything else remains a readable paper control by default. */
+.staff-shell .next-action button,
+.staff-shell .compact-list article > button,
+.staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button),
+.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button),
+.staff-shell .dispatch-modal .confirm-dispatch,
+.staff-shell .dispatch-modal .team-resource-card .resource-actions > button:not(.secondary),
+.staff-shell .dispatch-modal .modal-section > button:not(.secondary):not(.text-button),
+.staff-shell .dispatch-modal form > button,
+.staff-shell .staff-score-form button,
+.staff-shell .workshop-team-actions .qualify-button,
+.staff-shell .display-link {
+  background: var(--ops-green);
+  color: #fffdf2;
+}
+
+.staff-shell .next-action button:hover:not(:disabled),
+.staff-shell .next-action button:focus-visible:not(:disabled),
+.staff-shell .compact-list article > button:hover:not(:disabled),
+.staff-shell .compact-list article > button:focus-visible:not(:disabled),
+.staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button):hover:not(:disabled),
+.staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button):focus-visible:not(:disabled),
+.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button):hover:not(:disabled),
+.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button):focus-visible:not(:disabled),
+.staff-shell .dispatch-modal .confirm-dispatch:hover:not(:disabled),
+.staff-shell .dispatch-modal .confirm-dispatch:focus-visible:not(:disabled),
+.staff-shell .dispatch-modal .team-resource-card .resource-actions > button:not(.secondary):hover:not(:disabled),
+.staff-shell .dispatch-modal .team-resource-card .resource-actions > button:not(.secondary):focus-visible:not(:disabled),
+.staff-shell .dispatch-modal .modal-section > button:not(.secondary):not(.text-button):hover:not(:disabled),
+.staff-shell .dispatch-modal .modal-section > button:not(.secondary):not(.text-button):focus-visible:not(:disabled),
+.staff-shell .dispatch-modal form > button:hover:not(:disabled),
+.staff-shell .dispatch-modal form > button:focus-visible:not(:disabled),
+.staff-shell .staff-score-form button:hover:not(:disabled),
+.staff-shell .staff-score-form button:focus-visible:not(:disabled),
+.staff-shell .workshop-team-actions .qualify-button:hover:not(:disabled),
+.staff-shell .workshop-team-actions .qualify-button:focus-visible:not(:disabled),
+.staff-shell .display-link:hover,
+.staff-shell .display-link:focus-visible {
+  background: var(--ops-ink);
+  color: #fffdf2;
+  outline-color: var(--ops-cream);
+  outline-offset: 0;
 }
 
 .staff-shell button:active:not(:disabled),
@@ -249,6 +297,22 @@
   transform: translate(2px, 2px);
   box-shadow: none;
 }
+
+/* Disabled controls remain legible. Global opacity would fade a solid green
+   button and its white label into the paper background. */
+.staff-shell button:disabled {
+  border-color: #a9b7ad;
+  background: #eff1ed;
+  box-shadow: none;
+  color: var(--ops-muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.staff-shell button:disabled strong,
+.staff-shell button:disabled small,
+.staff-shell button:disabled span,
+.staff-shell button:disabled em { color: var(--ops-muted); }
 
 .staff-shell .text-button {
   border: 0;
@@ -316,10 +380,20 @@
 
 .staff-shell .grouping-tabs button + button { border-left: 2px solid var(--ops-ink); }
 
-.staff-shell .grouping-tabs button:hover,
+.staff-shell .grouping-tabs button:hover {
+  background: #f2ecd9;
+}
+
 .staff-shell .grouping-tabs button:focus-visible {
   background: #f2ecd9;
-  outline: none;
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
+}
+
+.staff-shell .grouping-tabs button.active:hover,
+.staff-shell .grouping-tabs button.active:focus-visible {
+  background: var(--ops-cream);
+  color: var(--ops-charcoal);
 }
 
 .staff-shell .compact-list article,
@@ -376,6 +450,14 @@
   box-shadow: inset 5px 0 0 var(--ops-green);
 }
 
+.staff-shell .dispatch-person-row.is-selected:hover,
+.staff-shell .dispatch-person-row.is-selected:focus-visible {
+  background: #d4ebdb;
+  color: var(--ops-ink);
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
+}
+
 .staff-shell .dispatch-person-row.is-selected strong,
 .staff-shell .dispatch-person-row.is-selected small { color: var(--ops-ink); }
 
@@ -394,7 +476,7 @@
 
 .staff-shell .team-board-card em,
 .staff-shell .dispatch-check,
-.staff-shell .team-picker-meta em { color: var(--ops-green); }
+.staff-shell .team-picker-meta em { color: var(--ops-ink); }
 
 .staff-shell .selection-tray {
   border: 2px solid var(--ops-ink);
@@ -458,6 +540,14 @@
   box-shadow: inset 0 -3px 0 var(--ops-cream);
 }
 
+.staff-shell .bottom-tabs button.active:hover,
+.staff-shell .bottom-tabs button.active:focus-visible {
+  background: var(--ops-ink);
+  color: #fffdf2;
+  outline-color: var(--ops-cream);
+  outline-offset: 0;
+}
+
 .staff-shell .modal-backdrop { background: rgba(8, 31, 23, .62); }
 .staff-shell .dispatch-modal {
   border: 2px solid var(--ops-charcoal);
@@ -487,7 +577,8 @@
 .staff-shell .workshop-team-actions .note-button:focus-visible {
   background: transparent;
   color: var(--ops-ink);
-  outline: 0;
+  outline: 3px solid var(--ops-ink);
+  outline-offset: 2px;
 }
 
 .staff-shell .workshop-team-actions .qualify-button {
@@ -630,6 +721,20 @@
   color: #fffdf2;
   font-weight: 800;
 }
+
+.admin-shell button:disabled {
+  border-color: #a9b7ad;
+  background: #eff1ed;
+  box-shadow: none;
+  color: var(--ops-muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.admin-shell button:disabled strong,
+.admin-shell button:disabled small,
+.admin-shell button:disabled span,
+.admin-shell button:disabled em { color: var(--ops-muted); }
 
 .admin-shell .admin-list button.secondary,
 .admin-shell button.secondary { background: #fffdf5; color: var(--ops-ink); }
