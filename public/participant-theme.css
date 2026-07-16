@@ -39,7 +39,6 @@
 .participant-notice { margin: 14px 0 0; padding: 0 2px; color: #9d1b1b; font-size: 13px; font-weight: 700; }
 .participant-content { display: grid; gap: 18px; margin-top: 22px; }
 .participant-experience .participant-intro { padding: 0 3px; }
-.participant-experience .participant-hello { margin: 0 0 7px; color: var(--ticket-emerald); font-size: 14px; font-weight: 850; }
 .participant-experience .participant-intro h1 { max-width: 600px; margin: 3px 0 0; color: var(--ticket-green); font-size: clamp(30px, 8vw, 48px); letter-spacing: -.075em; line-height: .98; }
 .participant-experience .ticket-kicker { margin: 0 0 7px; color: var(--ticket-emerald); font-size: 11px; font-weight: 900; letter-spacing: .13em; }
 .participant-experience .participant-ticket {
