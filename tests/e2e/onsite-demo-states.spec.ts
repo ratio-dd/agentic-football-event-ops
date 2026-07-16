@@ -54,7 +54,8 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await expect(page.locator(".code-card")).toContainText("Team Code");
   await expect(page.getByRole("link", { name: "进入 Workshop" })).toHaveAttribute("href", "https://example.com/workshop-e2e");
   await expect(page.getByRole("link", { name: "打开 Game Portal" })).toHaveAttribute("href", "https://agentic-football.aws.dev/");
-  await expect(page.getByText("已确认参加下午比赛；赛程将在名单冻结后公布。")).toBeVisible();
+  await expect(page.getByText("已确认参加下午比赛", { exact: true })).toBeVisible();
+  await expect(page.getByText("赛程将在名单冻结后公布。", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("participant-resource-links.png"), fullPage: true });
 });
 

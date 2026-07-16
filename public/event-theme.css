@@ -1,0 +1,17 @@
+:root {
+  --af-evergreen: #0f3d2e;
+  --af-emerald: #1e7a4f;
+  --af-ivory: #faf6e8;
+  --af-cream: #ffe08a;
+  --af-sky: #5db7ff;
+  --af-orange: #ff7a00;
+  --af-charcoal: #1f1f1f;
+  --af-paper-line: #d8cfb5;
+  --af-pixel-shadow: 3px 3px 0 rgba(15, 61, 46, .18);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .participant-ticket, .staff-shell .compact-list article, .staff-shell .team-board-card {
+    transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  }
+}

@@ -17,6 +17,11 @@ async function api(request: APIRequestContext, path: string, { method = "GET", s
 }
 
 async function capture(page: Page, testInfo: any, name: string) {
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), {
+      message: `截图 ${name} 前不应出现横向溢出`,
+    })
+    .toBe(true);
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true });
 }
 
