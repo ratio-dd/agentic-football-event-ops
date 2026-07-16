@@ -27,12 +27,12 @@ test("Staff stays on the selected operational tab after polling refresh", async 
   await expect(page.locator(".event-gates")).toHaveAttribute("open", "");
 
   await page.getByRole("button", { name: "Code", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "自动取码，逐队发放" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "导入、库存与发放记录" })).toBeVisible();
 
   await page.waitForTimeout(5_500);
 
   await expect(page.getByRole("button", { name: "Code", exact: true })).toHaveClass(/active/);
-  await expect(page.getByRole("heading", { name: "自动取码，逐队发放" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "导入、库存与发放记录" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
 });
 
@@ -85,6 +85,8 @@ test("Staff can move people from either board and sees capacity before a batch d
   await page.getByLabel("查找人员").fill(`调度体验${stamp}-1`);
   await page.locator(`[data-person-id="${people[0].id}"]`).click();
   await page.getByRole("button", { name: "加入队伍" }).click();
+  await expect(page.locator("#team-picker-search")).toBeVisible();
+  await page.locator("#team-picker-search").fill(teamB.teamNumber.replace("T-", ""));
   await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeEnabled();
   await page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`).click();
   await expect(page.getByRole("heading", { name: `确认加入 ${teamB.teamNumber}` })).toBeVisible();
@@ -97,11 +99,18 @@ test("Staff can move people from either board and sees capacity before a batch d
 
   const teamsTab = page.locator('[data-grouping-tab="teams"]');
   await expect(teamsTab).toHaveCount(1); await teamsTab.click();
+  await page.setViewportSize({ width: 390, height: 844 });
   const config = page.locator(`[data-action="open-team-config"][data-team-id="${teamB.id}"]`);
   await expect(config).toHaveCount(1); await config.click();
-  await expect(page.getByRole("heading", { name: `修改 ${teamB.teamNumber}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: teamB.teamNumber, exact: true })).toBeVisible();
   await expect(page.locator(`[data-person-id="${people[3].id}"]`)).toBeVisible();
   await expect(page.locator('[data-team-people-filter="unassigned"]')).toBeVisible();
+  await expect(page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`)).toBeEnabled();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator(`[data-action="issue-team-code"][data-team-id="${teamB.id}"]`).click();
+  await expect(page.getByText("已自动发放下一个可用 Code。")).toBeVisible();
+  await expect(page.getByText("已发放 Workshop Code")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("06-team-config-resource-issued-mobile.png"), fullPage: false });
   await page.getByRole("button", { name: "关闭" }).click();
   const peopleTab = page.locator('[data-grouping-tab="people"]');
   await expect(peopleTab).toHaveCount(1); await peopleTab.click();
@@ -113,9 +122,10 @@ test("Staff can move people from either board and sees capacity before a batch d
   await page.getByRole("button", { name: "加入队伍" }).click();
   await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeDisabled();
   await expect(page.getByText("容量不足").last()).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("07-team-picker-capacity-mobile.png"), fullPage: false });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await teamsTab.click();
   await expect(config).toContainText("管理");
-  await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("06-person-team-dispatch-mobile.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("08-person-team-dispatch-mobile.png"), fullPage: true });
 });

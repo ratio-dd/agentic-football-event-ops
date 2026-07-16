@@ -40,7 +40,7 @@ async function ensureDemoState(request: APIRequestContext): Promise<DemoFixture>
     const people = participants.map((item) => item.participant);
     const teamIds = [];
     for (const person of people.slice(0, 10)) teamIds.push((await api(request, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.id] } })).team.id);
-    await api(request, "/api/ops/codes/import", { method: "POST", staff, body: { codes: teamIds.map((_, index) => `E2E-DEMO-CODE-${String(index + 1).padStart(2, "0")}`) } });
+    await api(request, "/api/ops/codes/import", { method: "POST", staff, body: { codes: [...teamIds.map((_, index) => `E2E-DEMO-CODE-${String(index + 1).padStart(2, "0")}`), "E2E-DEMO-SPARE-CODE"] } });
     for (const teamId of teamIds) await api(request, `/api/ops/teams/${teamId}/issue-code`, { method: "POST", staff, body: {} });
     for (const teamId of teamIds.slice(0, 8)) await api(request, `/api/ops/qualification/teams/${teamId}/confirm`, { method: "POST", staff, body: {} });
     await api(request, `/api/ops/workshop/teams/${teamIds[8]}/status`, { method: "PUT", staff, body: { status: "in_progress", note: "正在部署 Agent" } });
