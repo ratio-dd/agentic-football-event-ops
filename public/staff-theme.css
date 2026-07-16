@@ -22,6 +22,60 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Staff may arrive on a phone via a shared URL. The login is intentionally a
+ * compact access ticket, not an empty generic form. */
+.staff-login-shell {
+  --ops-ink: var(--af-evergreen, #0f3d2e);
+  --ops-green: var(--af-emerald, #1e7a4f);
+  --ops-paper: var(--af-ivory, #faf6e8);
+  --ops-cream: var(--af-cream, #ffe08a);
+  --ops-charcoal: var(--af-charcoal, #1f1f1f);
+  min-height: 100dvh;
+  padding: 0 14px;
+  background:
+    radial-gradient(circle at 90% 17%, rgba(93, 183, 255, .36) 0 2px, transparent 3px),
+    radial-gradient(circle at 11% 74%, rgba(255, 122, 0, .30) 0 3px, transparent 4px),
+    linear-gradient(90deg, rgba(15, 61, 46, .04) 1px, transparent 1px) 0 0 / 18px 18px,
+    var(--ops-paper);
+}
+
+.staff-login-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  margin: 0 -14px;
+  padding: 12px 18px;
+  border: 2px solid var(--ops-charcoal);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+  background: var(--ops-ink);
+  box-shadow: 0 4px 0 rgba(15, 61, 46, .18);
+  color: #fffdf2;
+}
+
+.staff-login-top strong,
+.staff-login-top small { display: block; }
+.staff-login-top strong { font-size: 17px; letter-spacing: -.025em; }
+.staff-login-top small { margin-top: 2px; color: rgba(255, 253, 242, .76); font-size: 12px; }
+.staff-login-top a { color: #fffdf2; font-size: 13px; font-weight: 800; text-decoration: none; }
+.staff-login-top a:focus-visible { outline: 2px solid var(--ops-cream); outline-offset: 4px; }
+
+.staff-login-main { display: grid; min-height: calc(100dvh - 72px); place-items: start center; padding-top: clamp(42px, 12vh, 108px); }
+.staff-login-ticket { width: min(100%, 430px); padding: 24px; border: 2px solid var(--ops-charcoal); border-radius: 12px; background: linear-gradient(130deg, #fffdf7, rgba(255, 224, 138, .28)); box-shadow: 5px 5px 0 var(--ops-charcoal); }
+.staff-login-ticket::before { display: block; width: 48px; height: 6px; margin: -27px 0 20px auto; border-radius: 0 0 4px 4px; background: var(--ops-cream); content: ""; }
+.staff-login-label { margin: 0 0 5px; color: var(--ops-green); font-size: 12px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.staff-login-ticket h1 { margin: 0; color: var(--ops-ink); font-size: clamp(30px, 8vw, 42px); letter-spacing: -.065em; }
+.staff-login-ticket .stack { gap: 13px; margin-top: 24px; }
+.staff-login-ticket label { color: var(--ops-charcoal); font-size: 13px; font-weight: 850; }
+.staff-login-ticket input { min-height: 47px; border: 2px solid var(--ops-charcoal); border-radius: 8px; background: rgba(255,255,255,.82); color: var(--ops-charcoal); }
+.staff-login-ticket input:focus { border-color: var(--ops-green); outline: 3px solid color-mix(in srgb, var(--af-sky, #5db7ff) 55%, transparent); outline-offset: 1px; }
+.staff-login-hint { margin: -3px 0 2px; color: #627065; font-size: 12px; }
+.staff-login-ticket button { display: flex; align-items: center; justify-content: space-between; min-height: 50px; padding: 0 16px; border: 2px solid var(--ops-charcoal); border-radius: 8px; background: linear-gradient(135deg, var(--ops-ink), var(--ops-green)); box-shadow: 2px 2px 0 var(--ops-charcoal); color: #fffdf2; font-weight: 900; }
+.staff-login-ticket button span { font-size: 22px; line-height: 1; }
+.staff-login-ticket button:active { transform: translate(2px, 2px); box-shadow: none; }
+
 /* Staff is deliberately compact: an operator should see the current queue,
  * then act, without reading through a decorative hero. */
 .staff-shell {

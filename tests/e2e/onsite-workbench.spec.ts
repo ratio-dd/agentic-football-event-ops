@@ -17,8 +17,8 @@ test("参与者问卷在自动刷新后保留尚未提交的选择", async ({ pa
 
 test("Staff stays on the selected daily-work tab after polling refresh", async ({ page }) => {
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill("E2E TA");
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill("E2E TA");
   await page.getByRole("button", { name: "进入工作台" }).click();
 
   await page.getByRole("button", { name: "Workshop", exact: true }).click();
@@ -49,8 +49,8 @@ test("Staff sees an actionable QR result and can return to manual search", async
   }, participant.staffShortId);
 
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill(`扫码验收 ${stamp}`);
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill(`扫码验收 ${stamp}`);
   await page.getByRole("button", { name: "进入工作台" }).click();
   await page.getByRole("button", { name: "组队", exact: true }).click();
   await page.getByRole("button", { name: "扫描参与者二维码" }).click();
@@ -98,8 +98,8 @@ test("Staff creates a new team with one final confirmation and immediate pending
   });
 
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill(`新队流程 ${stamp}`);
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill(`新队流程 ${stamp}`);
   await page.getByRole("button", { name: "进入工作台" }).click();
   await page.getByRole("button", { name: "组队", exact: true }).click();
   await page.getByLabel("查找人员").fill(`新队确认${stamp}`);
@@ -124,20 +124,20 @@ test("public display is readable without Staff controls", async ({ page }) => {
   await page.goto("/display");
   await expect(page).toHaveTitle("Agentic Football 现场大屏");
   await expect(page.locator("#display-app")).toContainText(/agentic football/i);
-  await expect(page.getByText("Staff PIN")).toHaveCount(0);
+  await expect(page.getByText("工作台 PIN")).toHaveCount(0);
 });
 
 test("Staff can elevate to Admin from the More menu without a second Staff login", async ({ page }) => {
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill("E2E 管理员");
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill("E2E 管理员");
   await page.getByRole("button", { name: "进入工作台" }).click();
   await page.getByRole("button", { name: "更多", exact: true }).click();
   await expect(page.getByRole("heading", { name: "进入管理后台" })).toBeVisible();
   await page.getByLabel("Admin PIN").fill("meetup-admin");
   await page.getByRole("button", { name: "进入管理后台" }).click();
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "管理例外，不干扰现场" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "活动设置与例外处理" })).toBeVisible();
   await page.getByRole("button", { name: "返回 Staff" }).click();
   await expect(page).toHaveURL(/\/staff$/);
   await expect(page.locator(".metric-grid")).toBeVisible();
@@ -157,8 +157,8 @@ test("Staff can move people from either board and sees capacity before a batch d
   const teamB = (await call("/api/ops/teams", "POST", { memberIds: [people[1].id, people[2].id] }, staffHeaders)).team;
 
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill(`界面调度 ${stamp}`);
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill(`界面调度 ${stamp}`);
   await page.getByRole("button", { name: "进入工作台" }).click();
   await page.getByRole("button", { name: "组队", exact: true }).click();
   await page.getByLabel("查找人员").fill(`调度体验${stamp}-1`);

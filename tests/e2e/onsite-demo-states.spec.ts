@@ -21,8 +21,8 @@ async function adminSession(request: APIRequestContext, staff: string) {
 }
 async function staffLogin(page: Page, nickname: string) {
   await page.goto("/staff");
-  await page.getByLabel("Staff PIN").fill("meetup-staff");
-  await page.getByLabel("你的昵称").fill(nickname);
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill(nickname);
   await page.getByRole("button", { name: "进入工作台" }).click();
 }
 

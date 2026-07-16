@@ -38,7 +38,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await capture(page, testInfo, "01-participant-registration");
     await page.getByLabel("昵称", { exact: true }).fill(participantName);
     await page.getByRole("button", { name: "完成登记" }).click();
-    await expect(page.getByRole("heading", { name: "等待工作人员安排队伍" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "组建你的队伍" })).toBeVisible();
     await capture(page, testInfo, "02-participant-waiting-team");
     await page.getByRole("button", { name: "创建一个队伍" }).click();
     await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
@@ -57,6 +57,10 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await page.getByRole("button", { name: "我的二维码" }).click();
     await expect(page.getByText("Team Code", { exact: true })).toBeVisible();
     await capture(page, testInfo, "04-participant-code-and-qr");
+    await api(request, `/api/ops/qualification/teams/${selfTeam.id}/confirm`, { method: "POST", staff, body: {} });
+    await page.reload();
+    await expect(page.getByText("已确认参加下午比赛", { exact: true })).toBeVisible();
+    await capture(page, testInfo, "04a-participant-qualified");
 
     const people: any[] = [];
     for (let index = 1; index <= 5; index += 1) {
@@ -86,8 +90,8 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
 
     await page.goto("/staff");
     await capture(page, testInfo, "05-staff-login");
-    await page.getByLabel("Staff PIN").fill("meetup-staff");
-    await page.getByLabel("你的昵称").fill(`画廊审核${stamp}`);
+    await page.getByLabel("工作台 PIN").fill("meetup-staff");
+    await page.getByLabel("显示昵称").fill(`画廊审核${stamp}`);
     await page.getByRole("button", { name: "进入工作台" }).click();
     await expect(page.locator(".metric-grid")).toBeVisible();
     await capture(page, testInfo, "06-staff-overview");
