@@ -84,7 +84,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await page.getByLabel("Staff PIN").fill("meetup-staff");
     await page.getByLabel("你的昵称").fill(`画廊审核${stamp}`);
     await page.getByRole("button", { name: "进入工作台" }).click();
-    await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toBeVisible();
+    await expect(page.locator(".metric-grid")).toBeVisible();
     await capture(page, testInfo, "06-staff-overview");
 
     await page.getByRole("button", { name: "组队", exact: true }).click();

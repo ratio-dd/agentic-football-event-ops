@@ -22,12 +22,12 @@ test("Staff stays on the selected daily-work tab after polling refresh", async (
   await page.getByRole("button", { name: "进入工作台" }).click();
 
   await page.getByRole("button", { name: "Workshop", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "发放资源，核验练习赛" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /待 TA 确认/ })).toBeVisible();
 
   await page.waitForTimeout(5_500);
 
   await expect(page.getByRole("button", { name: "Workshop", exact: true })).toHaveClass(/active/);
-  await expect(page.getByRole("heading", { name: "发放资源，核验练习赛" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /待 TA 确认/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
 });
 
@@ -140,7 +140,7 @@ test("Staff can elevate to Admin from the More menu without a second Staff login
   await expect(page.getByRole("heading", { name: "管理例外，不干扰现场" })).toBeVisible();
   await page.getByRole("button", { name: "返回 Staff" }).click();
   await expect(page).toHaveURL(/\/staff$/);
-  await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toBeVisible();
+  await expect(page.locator(".metric-grid")).toBeVisible();
 });
 
 test("Staff can move people from either board and sees capacity before a batch dispatch", async ({ page, request }, testInfo) => {

@@ -58,7 +58,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
     read("public/participant.js"), read("public/admin.js"), read("public/app.js"), read("public/styles.css"),
   ]);
   assert.match(participant, /换手机了？恢复我的状态/);
-  assert.match(participant, /有心仪的队友/);
+  assert.match(participant, /自助组队/);
   assert.match(participant, /创建一个队伍/);
   assert.match(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
@@ -76,7 +76,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(app, /restoreDrafts/);
   assert.match(staff, /controls\.ui\.tab/);
   assert.match(staff, /selectedPersonIds/);
-  assert.match(staff, /人员和队伍是两种资源/);
+  assert.match(staff, /grouping-tabs/);
   assert.match(staff, /容量不足/);
   assert.match(staff, /Admin 可在资源管理中回收/);
   assert.doesNotMatch(staff, /name="codeId"/);
