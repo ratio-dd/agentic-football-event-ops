@@ -2,6 +2,56 @@ const e = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<"
 const field = (name, label, options) => `<label>${label}<select name="${name}">${options.map(([value, text]) => `<option value="${value}">${text}</option>`).join("")}</select></label>`;
 const teamStatus = (team) => ({ draft: "队伍已创建，等待工作人员确认", ready_code: "队伍已确认，等待领取 Workshop 资源", issued: "已领取 Workshop 资源", ta_qualified: "已确认进入下午比赛" }[team?.status] || "等待工作人员安排");
 const QR_OPEN_KEY = "afc-event-ops-qr-open";
+let ticketFrameObserver;
+
+const ticketFrame = () => `<svg class="ticket-frame" aria-hidden="true" preserveAspectRatio="none"><path class="ticket-frame-shape"/></svg>`;
+
+function ticketFramePath(width, height) {
+  const strokeInset = 2;
+  const left = 12;
+  const right = Math.max(left + 1, width - 12);
+  const top = strokeInset;
+  const bottom = Math.max(top + 1, height - strokeInset);
+  const corner = Math.min(11, Math.max(6, height / 6));
+  const toothDepth = 8;
+  const toothHeight = 12;
+  const toothPitch = 23;
+  const usableTop = top + corner + 3;
+  const usableBottom = bottom - corner - 3;
+  const count = Math.max(1, Math.floor((usableBottom - usableTop - toothHeight) / toothPitch) + 1);
+  const used = toothHeight + (count - 1) * toothPitch;
+  const first = usableTop + Math.max(0, (usableBottom - usableTop - used) / 2);
+  const starts = Array.from({ length: count }, (_, index) => first + index * toothPitch);
+  let d = `M ${left + corner} ${top} H ${right - corner} Q ${right} ${top} ${right} ${top + corner} V ${starts[0]}`;
+  starts.forEach((start, index) => {
+    const end = start + toothHeight;
+    d += ` C ${right - toothDepth} ${start} ${right - toothDepth} ${end} ${right} ${end}`;
+    d += ` V ${index === starts.length - 1 ? bottom - corner : starts[index + 1]}`;
+  });
+  d += ` Q ${right} ${bottom} ${right - corner} ${bottom} H ${left + corner} Q ${left} ${bottom} ${left} ${bottom - corner} V ${starts[starts.length - 1] + toothHeight}`;
+  [...starts].reverse().forEach((start, index) => {
+    d += ` C ${left + toothDepth} ${start + toothHeight} ${left + toothDepth} ${start} ${left} ${start}`;
+    d += ` V ${index === starts.length - 1 ? top + corner : starts[starts.length - 2 - index] + toothHeight}`;
+  });
+  return `${d} Q ${left} ${top} ${left + corner} ${top} Z`;
+}
+
+function syncTicketFrames(root) {
+  ticketFrameObserver?.disconnect();
+  const update = (card) => {
+    const svg = card.querySelector(".ticket-frame");
+    const path = card.querySelector(".ticket-frame-shape");
+    const { width, height } = card.getBoundingClientRect();
+    if (!svg || !path || width < 40 || height < 40) return;
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    path.setAttribute("d", ticketFramePath(width, height));
+  };
+  ticketFrameObserver = new ResizeObserver((entries) => entries.forEach((entry) => update(entry.target)));
+  root.querySelectorAll(".ticket-stamped").forEach((card) => {
+    update(card);
+    ticketFrameObserver.observe(card);
+  });
+}
 
 export function renderParticipant(root, state, api, refresh) {
   const p = state.currentParticipant; const team = state.currentTeam;
@@ -10,12 +60,13 @@ export function renderParticipant(root, state, api, refresh) {
   const teamInfo = !team ? (selfTeamOpen
     ? `<section class="participant-ticket participant-team-action"><h2>自助组队</h2><p class="ticket-support">输入队伍编号加入；每队最多 3 人。</p><form id="self-team-create" class="stack"><button class="ticket-primary">创建一个队伍 <span aria-hidden="true">＋</span></button></form><div class="ticket-divider"><span>或</span></div><form id="self-team-join" class="ticket-join-form"><label>加入队友的队伍<input name="teamNumber" inputmode="numeric" maxlength="8" placeholder="001 或 T-001"></label><button class="ticket-arrow" aria-label="加入队伍">→</button></form></section>`
     : `<section class="participant-ticket participant-waiting"><span class="waiting-icon" aria-hidden="true">•••</span><h2>工作人员正在编组</h2><p>请向工作人员展示你的现场编号，或报出昵称。</p></section>`)
-    : `<section class="participant-ticket participant-team-card"><span class="ticket-label">队伍编号</span><strong class="team-ticket-number">${e(team.teamNumber)}</strong><ul class="ticket-member-list">${team.members.map((member) => `<li><span aria-hidden="true">●</span><strong>${e(member.nickname)}</strong><small>${e(member.staffShortId)}</small></li>`).join("")}</ul><p class="team-confirmation">${team.status === "draft" ? (selfTeamOpen ? "队友输入此队伍编号即可加入（最多 3 人）。" : "工作人员正在确认队伍。") : "✓ 工作人员已确认队伍"}</p></section>${team.teamCode ? `<section class="participant-ticket participant-code-card code-card"><div class="code-ticket-head"><span>Team Code</span><button id="copy-team-code" type="button" class="ticket-copy" aria-label="复制 Team Code">⧉</button></div><strong class="ticket-code">${e(team.teamCode)}</strong><p>队内自行协商一人使用 AWS 账号注册 Workshop。</p><div class="ticket-resource-actions">${state.event.workshopUrl ? `<a href="${e(state.event.workshopUrl)}" target="_blank" rel="noreferrer">进入 Workshop</a><button id="copy-workshop-link" type="button" class="ticket-icon-action" aria-label="复制 Workshop 链接">⧉</button>` : ""}</div><div class="ticket-resource-actions ticket-portal-actions"><a href="${e(state.event.gamePortalUrl)}" target="_blank" rel="noreferrer">打开 Game Portal</a><button id="copy-portal-link" type="button" class="ticket-icon-action" aria-label="复制 Game Portal 链接">⧉</button></div></section>` : team.teamCodeAssigned ? `<section class="participant-status-strip pending"><span aria-hidden="true">◌</span><p>请向工作人员核验后查看 Code。</p></section>` : ""}${team.teamCode || team.qualificationStatus === "ta_qualified" ? `<section class="participant-status-strip ${team.qualificationStatus === "ta_qualified" ? "qualified" : "pending"}"><span aria-hidden="true">${team.qualificationStatus === "ta_qualified" ? "✓" : "◌"}</span><div><strong>${team.qualificationStatus === "ta_qualified" ? "已确认参加下午比赛" : "下一步：完成练习赛"}</strong><p>${team.qualificationStatus === "ta_qualified" ? "赛程将在名单冻结后公布。" : "完成 Workshop 后，在 Game Portal 完成练习赛，再请 TA 确认。"}</p></div></section>` : ""}`;
+    : `<section class="participant-ticket ticket-stamped participant-team-card">${ticketFrame()}<div class="ticket-surface"><span class="ticket-label">队伍编号</span><strong class="team-ticket-number">${e(team.teamNumber)}</strong><ul class="ticket-member-list">${team.members.map((member) => `<li><span aria-hidden="true">●</span><strong>${e(member.nickname)}</strong><small>${e(member.staffShortId)}</small></li>`).join("")}</ul><p class="team-confirmation">${team.status === "draft" ? (selfTeamOpen ? "队友输入此队伍编号即可加入（最多 3 人）。" : "工作人员正在确认队伍。") : "✓ 工作人员已确认队伍"}</p></div></section>${team.teamCode ? `<section class="participant-ticket participant-code-card code-card"><div class="code-ticket-head"><span>Team Code</span><button id="copy-team-code" type="button" class="ticket-copy" aria-label="复制 Team Code">⧉</button></div><strong class="ticket-code">${e(team.teamCode)}</strong><p>队内自行协商一人使用 AWS 账号注册 Workshop。</p><div class="ticket-resource-actions">${state.event.workshopUrl ? `<a href="${e(state.event.workshopUrl)}" target="_blank" rel="noreferrer">进入 Workshop</a><button id="copy-workshop-link" type="button" class="ticket-icon-action" aria-label="复制 Workshop 链接">⧉</button>` : ""}</div><div class="ticket-resource-actions ticket-portal-actions"><a href="${e(state.event.gamePortalUrl)}" target="_blank" rel="noreferrer">打开 Game Portal</a><button id="copy-portal-link" type="button" class="ticket-icon-action" aria-label="复制 Game Portal 链接">⧉</button></div></section>` : team.teamCodeAssigned ? `<section class="participant-status-strip pending"><span aria-hidden="true">◌</span><p>请向工作人员核验后查看 Code。</p></section>` : ""}${team.teamCode || team.qualificationStatus === "ta_qualified" ? `<section class="participant-status-strip ${team.qualificationStatus === "ta_qualified" ? "qualified" : "pending"}"><span aria-hidden="true">${team.qualificationStatus === "ta_qualified" ? "✓" : "◌"}</span><div><strong>${team.qualificationStatus === "ta_qualified" ? "已确认参加下午比赛" : "下一步：完成练习赛"}</strong><p>${team.qualificationStatus === "ta_qualified" ? "赛程将在名单冻结后公布。" : "完成 Workshop 后，在 Game Portal 完成练习赛，再请 TA 确认。"}</p></div></section>` : ""}`;
   const schedule = state.tournament && team?.qualificationStatus === "ta_qualified" ? `<section class="participant-ticket participant-schedule"><h2>下午比赛</h2><ul class="ticket-match-list">${state.tournament.matches.filter((m) => m.teamALabel === team?.teamNumber || m.teamBLabel === team?.teamNumber).map((m) => `<li><strong>${e(m.teamALabel)} <span>vs</span> ${e(m.teamBLabel)}</strong><em>${m.scoreA ?? "-"}:${m.scoreB ?? "-"}</em></li>`).join("") || "赛程将在名单冻结后公布"}</ul></section>` : "";
   const showQr = p && sessionStorage.getItem(QR_OPEN_KEY) === p.id;
-  const personalQr = p ? `<section id="participant-qr" class="participant-ticket participant-qr-ticket" ${showQr ? "" : "hidden"}><div class="qr-ticket-top"><span>我的二维码</span><button data-action="close-qr" type="button" class="ticket-close" aria-label="关闭二维码">×</button></div><div class="qr-ticket-body"><div class="qr-code-stage"><img src="/api/participant/qr?participant=${encodeURIComponent(p.staffShortId)}" width="196" height="196" alt="${e(p.staffShortId)} 的工作人员扫码二维码"></div><p>请让工作人员扫描。</p></div></section>` : "";
-  const profile = p ? `<section class="participant-intro"><h1>${team ? teamStatus(team) : selfTeamOpen ? "组建你的队伍" : "等待工作人员安排队伍"}</h1></section><section class="participant-ticket participant-id-ticket"><div class="id-ticket-icon" aria-hidden="true">●</div><div><span class="ticket-label">你的现场编号</span><strong class="person-ticket-number">${e(p.staffShortId)}</strong><small>向 Staff 出示此编号。</small></div><button id="toggle-qr" type="button" class="ticket-qr-button">${showQr ? "收起二维码" : "我的二维码"}</button></section>${personalQr}${teamInfo}${schedule}` : registration;
+  const personalQr = p && showQr ? `<div class="participant-qr-overlay"><section id="participant-qr" class="participant-ticket ticket-stamped participant-qr-ticket">${ticketFrame()}<div class="ticket-surface"><div class="qr-ticket-top"><span>我的二维码</span><button data-action="close-qr" type="button" class="ticket-close" aria-label="关闭二维码">×</button></div><div class="qr-ticket-body"><div class="qr-code-stage"><img src="/api/participant/qr?participant=${encodeURIComponent(p.staffShortId)}" width="196" height="196" alt="${e(p.staffShortId)} 的工作人员扫码二维码"></div><p>请让工作人员扫描。</p></div></div></section></div>` : "";
+  const profile = p ? `<section class="participant-intro"><h1>${team ? teamStatus(team) : selfTeamOpen ? "组建你的队伍" : "等待工作人员安排队伍"}</h1></section><section class="participant-ticket ticket-stamped participant-id-ticket">${ticketFrame()}<div class="ticket-surface"><div class="id-ticket-icon" aria-hidden="true">●</div><div><span class="ticket-label">你的现场编号</span><strong class="person-ticket-number">${e(p.staffShortId)}</strong><small>向 Staff 出示此编号。</small></div><button id="toggle-qr" type="button" class="ticket-qr-button">我的二维码</button></div></section>${teamInfo}${schedule}${personalQr}` : registration;
   root.innerHTML = `<div class="mobile-shell participant-experience"><header class="topbar participant-topbar"><a class="participant-brand" href="/" aria-label="Agentic Football 参与者首页"><span aria-hidden="true">⚽</span><strong>Agentic Football</strong><em>北京 MeetUp</em></a><span class="top-actions participant-top-actions"><button type="button" class="text-button" data-feedback>反馈</button><a href="/staff">Staff</a></span></header><p class="notice participant-notice" aria-live="polite"></p><main class="participant-content">${profile}</main></div>`;
+  syncTicketFrames(root);
   const notice = root.querySelector(".notice"); const submit = (selector, handler) => root.querySelector(selector)?.addEventListener("submit", async (event) => { event.preventDefault(); const button = event.target.querySelector("button"); button.disabled = true; try { await handler(new FormData(event.target)); await refresh(); } catch (error) { notice.textContent = error.message; } finally { button.disabled = false; } });
   root.querySelector("#toggle-qr")?.addEventListener("click", () => { const open = sessionStorage.getItem(QR_OPEN_KEY) === p.id; if (open) sessionStorage.removeItem(QR_OPEN_KEY); else sessionStorage.setItem(QR_OPEN_KEY, p.id); renderParticipant(root, state, api, refresh); });
   root.querySelector("[data-action='close-qr']")?.addEventListener("click", () => { sessionStorage.removeItem(QR_OPEN_KEY); renderParticipant(root, state, api, refresh); });
