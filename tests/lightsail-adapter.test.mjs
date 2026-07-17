@@ -48,7 +48,7 @@ test("Lightsail SQLite adapter keeps participant and staff state in one durable 
       method: "POST", body: { staffPin: "lightsail-staff", staffNickname: "SQLite TA" },
     });
     assert.equal(login.response.status, 200);
-    const created = await call(worker, firstDatabase, "/api/teams/self", { method: "POST", client: "lightsail-phone", body: {} });
+    const created = await call(worker, firstDatabase, "/api/ops/teams", { method: "POST", staff: login.data.staffSession, body: { memberIds: [registered.data.participant.id] } });
     assert.equal(created.response.status, 200);
     firstDatabase.close();
 

@@ -37,7 +37,7 @@ async function elevate(worker, db, staff) {
   return session.data.adminSession;
 }
 
-test("onsite state machine removes self-service team ownership", async () => {
+test("onsite state machine keeps team assignment in the Staff workflow", async () => {
   const worker = await read("worker/index.ts");
   assert.match(worker, /\/api\/participants\/rebind/);
   assert.match(worker, /\/api\/ops\/codes\/import/);
@@ -47,6 +47,8 @@ test("onsite state machine removes self-service team ownership", async () => {
   assert.match(worker, /api\/admin\/session/);
   assert.match(worker, /需要管理后台权限/);
   assert.match(worker, /此环境尚未配置 Staff PIN/);
+  assert.match(worker, /\/api\/teams\/self/);
+  assert.match(worker, /selfServiceTeam: false/);
   assert.doesNotMatch(worker, /function createTeam\(/);
   assert.doesNotMatch(worker, /function joinTeam\(/);
   assert.doesNotMatch(worker, /inviteCode/);
@@ -58,9 +60,10 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
     read("public/participant.js"), read("public/admin.js"), read("public/app.js"), read("public/styles.css"),
   ]);
   assert.match(participant, /换手机了？恢复我的状态/);
-  assert.match(participant, /自助组队/);
-  assert.match(participant, /创建一个队伍/);
-  assert.match(participant, /加入队友的队伍/);
+  assert.match(participant, /等待工作人员安排队伍/);
+  assert.doesNotMatch(participant, /自助组队/);
+  assert.doesNotMatch(participant, /创建一个队伍/);
+  assert.doesNotMatch(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
   assert.match(participant, /team\?\.teamNumber/);
   assert.doesNotMatch(participant, /officialLabel/);
@@ -95,14 +98,28 @@ test("shared deployment fails closed without configured Staff and administrator 
   assert.equal(noStaff.status, 503);
   const registered = await call(worker, db, "/api/participants", { method: "POST", client: "gate-phone", body: { nickname: "开关测试", supportProfile: {} } });
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "管理员" } });
-  const denied = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, body: { gates: { selfServiceTeam: false } } });
+  const denied = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, body: { gates: { codeIssuance: false } } });
   assert.equal(denied.response.status, 403);
   const admin = await elevate(worker, db, login.data.staffSession);
-  const updated = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, admin, body: { gates: { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true } } });
+  const updated = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, admin, body: { gates: { codeIssuance: true, qualification: true, scheduleEditing: true } } });
   assert.equal(updated.response.status, 200);
-  const selfTeam = await call(worker, db, "/api/teams/self", { method: "POST", client: "gate-phone", body: {} });
-  assert.equal(selfTeam.response.status, 409);
+  const hiddenEndpoint = await call(worker, db, "/api/teams/self", { method: "POST", client: "gate-phone", body: {} });
+  assert.equal(hiddenEndpoint.response.status, 409);
   assert.equal(registered.response.status, 200);
+});
+
+test("registration creates a single-person draft team before Staff merges overflow", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  for (let index = 1; index <= 40; index += 1) {
+    const registered = await call(worker, db, "/api/participants", { method: "POST", client: `auto-team-${index}`, body: { nickname: `自动队${index}`, supportProfile: {} } });
+    assert.equal(registered.response.status, 200);
+    assert.equal(registered.data.team.memberIds.length, 1);
+  }
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "编组 TA" } });
+  const state = await call(worker, db, "/api/ops/state", { staff: login.data.staffSession });
+  assert.equal(state.data.participants.length, 40);
+  assert.equal(state.data.teams.filter((team) => team.status !== "dissolved").length, 40);
+  assert.equal(state.data.event.maxWorkshopTeams, 32);
 });
 
 test("staff can group people, issue an official code, and a rebound browser cannot read it", async () => {
@@ -137,15 +154,13 @@ test("staff can group people, issue an official code, and a rebound browser cann
   assert.equal(reboundView.data.currentTeam.teamCode, null);
 });
 
-test("participants can self-organize with a team number, while staff search accepts bare participant numbers", async () => {
+test("Staff assigns teams, while staff search accepts bare participant numbers", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
   const first = await call(worker, db, "/api/participants", { method: "POST", client: "phone-one", body: { nickname: "自组甲", supportProfile: {} } });
-  await call(worker, db, "/api/participants", { method: "POST", client: "phone-two", body: { nickname: "自组乙", supportProfile: {} } });
-  const created = await call(worker, db, "/api/teams/self", { method: "POST", client: "phone-one", body: {} });
-  assert.equal(created.response.status, 200); assert.equal(created.data.team.teamNumber, "T-001");
-  const joined = await call(worker, db, "/api/teams/self/join", { method: "POST", client: "phone-two", body: { teamNumber: "001" } });
-  assert.equal(joined.response.status, 200); assert.equal(joined.data.team.memberIds.length, 2);
+  const second = await call(worker, db, "/api/participants", { method: "POST", client: "phone-two", body: { nickname: "自组乙", supportProfile: {} } });
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "TA 搜索" } });
+  const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff: login.data.staffSession, body: { memberIds: [first.data.participant.id, second.data.participant.id] } });
+  assert.equal(created.response.status, 200); assert.equal(created.data.team.teamNumber, "T-001");
   const found = await call(worker, db, "/api/ops/participants?q=001", { staff: login.data.staffSession });
   assert.equal(found.response.status, 200); assert.equal(found.data.participants[0].staffShortId, first.data.participant.staffShortId);
   const firstView = await call(worker, db, "/api/state", { client: "phone-one" });

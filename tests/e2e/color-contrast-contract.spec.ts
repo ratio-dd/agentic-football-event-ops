@@ -181,15 +181,14 @@ test("Staff list rows keep readable colors across normal, selected, full, hover,
   await expectControlStatesReadable(page.getByRole("button", { name: "移出" }).first(), "成员移出操作");
 });
 
-test("participant ticket labels remain readable on team and resource cards", async ({ page }) => {
+test("participant ticket labels remain readable on identity and resource cards", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("昵称", { exact: true }).fill(`票根颜色${Date.now()}`);
   await page.getByRole("button", { name: "完成登记" }).click();
-  await page.getByRole("button", { name: "创建一个队伍" }).click();
-  const label = page.locator(".participant-team-card .ticket-label").first();
+  const label = page.locator(".participant-id-ticket .ticket-label").first();
   const colors = await label.evaluate((element) => ({
     foreground: getComputedStyle(element).color,
-    background: getComputedStyle(element.parentElement!).backgroundColor,
+    background: getComputedStyle(element.closest(".participant-id-ticket")!.querySelector(".ticket-frame-shape")!).fill,
   }));
   expect(contrast(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
   await page.evaluate(() => {
@@ -234,12 +233,12 @@ test("semantic palette matrix keeps every reusable control role readable", async
         <div class="modal-backdrop"><section class="dispatch-modal"><div class="modal-header"><button class="text-button" data-state-id="modal-close">关闭</button></div><section class="team-resource-card"><span class="resource-actions"><button data-state-id="resource-primary">发放 Code</button><button class="secondary" data-state-id="resource-secondary">确认队伍</button></span></section><section class="modal-section"><button data-state-id="modal-primary">加入此队</button></section><div class="team-picker-list"><button data-state-id="picker-available"><span><strong>T-002</strong><small>可加入</small></span><span class="team-picker-meta"><em>2 / 3</em><small>可发放资源</small></span></button><button disabled data-state-id="picker-full"><span><strong>T-003</strong><small>满员</small></span><span class="team-picker-meta"><em>3 / 3</em><small>容量不足</small></span></button></div></section></div>
       </div>
       <div class="state-matrix admin-shell"><header class="admin-top"><div class="top-actions"><button class="text-button" data-state-id="admin-header-text">返回 Staff</button></div></header><main><nav class="admin-nav"><button class="active" data-state-id="admin-nav-active">活动设置</button><button data-state-id="admin-nav">资源管理</button></nav><section class="admin-panel"><form class="admin-form"><button data-state-id="admin-primary">保存设置</button><button disabled data-state-id="admin-disabled">生成赛程</button></form><div class="admin-list"><button class="secondary" data-state-id="admin-secondary">回收 Code</button></div></section></main></div>
-      <div class="participant-experience"><header class="participant-topbar"><div class="participant-top-actions"><button class="text-button" data-state-id="participant-header-text">反馈</button></div></header><main><button class="ticket-primary" data-state-id="participant-primary">创建队伍</button><button class="ticket-secondary" data-state-id="participant-secondary">加入队伍</button><button class="ticket-qr-button" data-state-id="participant-qr">我的二维码</button><button class="ticket-primary" disabled data-state-id="participant-disabled">提交中</button></main></div>`;
+      <div class="participant-experience"><header class="participant-topbar"><div class="participant-top-actions"><button class="text-button" data-state-id="participant-header-text">反馈</button></div></header><main><button class="ticket-primary" data-state-id="participant-primary">完成登记</button><button class="ticket-qr-button" data-state-id="participant-qr">我的二维码</button><button class="ticket-primary" disabled data-state-id="participant-disabled">提交中</button></main></div>`;
   });
 
   const controls = page.locator("[data-state-id]");
   const count = await controls.count();
-  expect(count).toBeGreaterThanOrEqual(25);
+  expect(count).toBeGreaterThanOrEqual(24);
   for (let index = 0; index < count; index += 1) {
     const control = controls.nth(index);
     await expectControlStatesReadable(control, `palette:${await control.getAttribute("data-state-id")}`);

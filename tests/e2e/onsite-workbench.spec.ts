@@ -71,14 +71,15 @@ test("Staff sees an actionable QR result and can return to manual search", async
   await expect(page.getByLabel("查找人员")).toBeVisible();
 });
 
-test("participant can create a nameless team and receive only a team number", async ({ page }) => {
+test("participant receives a draft team at registration without self-service controls", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("昵称", { exact: true }).fill(`自组体验员${Date.now()}`);
+  await page.getByLabel("昵称", { exact: true }).fill(`自动编组体验员${Date.now()}`);
   await page.getByRole("button", { name: "完成登记" }).click();
-  await page.getByRole("button", { name: "创建一个队伍" }).click();
 
   await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
   await expect(page.getByText(/T-\d{3}/)).toBeVisible();
+  await expect(page.getByText("工作人员正在确认队伍。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /创建一个队伍|加入队伍/ })).toHaveCount(0);
   await expect(page.getByText("队长", { exact: true })).toHaveCount(0);
 });
 

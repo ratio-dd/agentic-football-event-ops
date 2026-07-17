@@ -38,19 +38,20 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await capture(page, testInfo, "01-participant-registration");
     await page.getByLabel("昵称", { exact: true }).fill(participantName);
     await page.getByRole("button", { name: "完成登记" }).click();
-    await expect(page.getByRole("heading", { name: "组建你的队伍" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "等待工作人员安排队伍" })).toBeVisible();
     await capture(page, testInfo, "02-participant-waiting-team");
-    await page.getByRole("button", { name: "创建一个队伍" }).click();
-    await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
-    await capture(page, testInfo, "03-participant-self-team");
 
     const staffLogin = await api(request, "/api/ops/session", { method: "POST", body: { staffPin: "meetup-staff", staffNickname: `画廊初始化${stamp}` } });
     const staff = staffLogin.staffSession;
     const elevated = await api(request, "/api/admin/session", { method: "POST", staff, body: { adminPin: ADMIN_PIN } });
     const admin = elevated.adminSession;
-    const stateAfterSelfTeam = await api(request, "/api/ops/state", { staff });
-    const selfParticipant = stateAfterSelfTeam.participants.find((person: any) => person.nickname === participantName);
-    const selfTeam = stateAfterSelfTeam.teams.find((team: any) => team.id === selfParticipant.teamId);
+    const stateAfterRegistration = await api(request, "/api/ops/state", { staff });
+    const registeredParticipant = stateAfterRegistration.participants.find((person: any) => person.nickname === participantName);
+    const assigned = await api(request, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [registeredParticipant.id] } });
+    const selfTeam = assigned.team;
+    await page.reload();
+    await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
+    await capture(page, testInfo, "03-participant-staff-assigned-team");
     await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { codes: Array.from({ length: 12 }, (_, index) => `VISUAL-REVIEW-${stamp}-${index + 1}`) } });
     await api(request, `/api/ops/teams/${selfTeam.id}/issue-code`, { method: "POST", staff, body: {} });
     await page.goto("/");

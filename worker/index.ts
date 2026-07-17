@@ -80,7 +80,7 @@ async function mutation(env: Env, request: Request, action: (s: State) => any): 
   return json({ error: "现场数据刚刚发生变化，请重试" }, 409);
 }
 
-function defaultGates() { return { selfServiceTeam: true, codeIssuance: true, qualification: true, scheduleEditing: true }; }
+function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true }; }
 const DEMO_WORKSHOP_URL = "https://example.com/agentic-football-workshop";
 const GAME_PORTAL_URL = "https://agentic-football.aws.dev/";
 function initialState() { return { event: { id: EVENT_ID, name: "Agentic Football 现场运营台", maxWorkshopTeams: 32, workshopUrl: DEMO_WORKSHOP_URL, gamePortalUrl: GAME_PORTAL_URL, gates: defaultGates() }, participants: [], teams: [], workshopCodes: [], competition: { frozenTeamIds: [], frozenAt: null, frozenBy: null }, staffAccounts: [], staffSessions: [], adminSessions: [], tournament: null, auditLog: [], feedback: [] }; }
@@ -116,7 +116,10 @@ async function register(s: State, request: Request) {
   const existing = s.participants.find((p: any) => p.clientIds.includes(clientId)); if (existing) return { participant: publicParticipant(existing, clientId) };
   if (s.participants.some((p: any) => p.nickname === nickname)) return fail("昵称已被使用，请换一个", 409);
   const participant = { id: id(), nickname, clientIds: [clientId], codeVisibleClientIds: [clientId], staffShortId: `P-${String(s.participants.length + 1).padStart(3, "0")}`, supportProfile: { techBackground: text(b.supportProfile?.techBackground, 20) || "unknown", workshopExperience: text(b.supportProfile?.workshopExperience, 20) || "unknown" }, teamId: null, registeredAt: now(), reboundAt: null };
-  s.participants.push(participant); audit(s, { id: "participant", nickname }, "participant.registered", "participant", participant.id); return { participant: publicParticipant(participant, clientId) };
+  s.participants.push(participant);
+  const initialTeam = teamRecord(s, [participant.id]); participant.teamId = initialTeam.id; s.teams.push(initialTeam);
+  audit(s, { id: "participant", nickname }, "participant.registered", "participant", participant.id); audit(s, { id: "system", nickname: "系统" }, "team.auto.created", "team", initialTeam.id, "登记时创建单人草稿队");
+  return { participant: publicParticipant(participant, clientId), team: initialTeam };
 }
 async function rebind(s: State, request: Request) {
   const b = await body(request); const nickname = text(b.nickname, 24); const clientId = client(request, b); const participant = s.participants.find((p: any) => p.nickname === nickname);
@@ -126,8 +129,8 @@ async function rebind(s: State, request: Request) {
 }
 function teamRecord(s: State, memberIds: string[]) { return { id: id(), teamNumber: nextTeamNumber(s), memberIds, status: "draft", workshopStatus: "not_started", qualificationStatus: "not_qualified", codeIssuedAt: null, codeIssuedBy: null, createdAt: now() }; }
 function participantForClient(s: State, request: Request) { return s.participants.find((p: any) => p.clientIds.includes(client(request))); }
-function createSelfTeam(s: State, request: Request) { if (!s.event.gates.selfServiceTeam) return fail("自助组队已结束，请向工作人员出示现场编号", 409); const participant = participantForClient(s, request); if (!participant) return fail("请先完成登记", 403); if (participant.teamId) return fail("你已经在一支队伍中", 409); const t = teamRecord(s, [participant.id]); s.teams.push(t); participant.teamId = t.id; audit(s, { id: "participant", nickname: participant.nickname }, "team.self.created", "team", t.id); return { team: t }; }
-async function joinSelfTeam(s: State, request: Request) { if (!s.event.gates.selfServiceTeam) return fail("自助组队已结束，请向工作人员出示现场编号", 409); const participant = participantForClient(s, request); const b = await body(request); const t = teamByNumber(s, b.teamNumber); if (!participant) return fail("请先完成登记", 403); if (participant.teamId) return fail("你已经在一支队伍中", 409); if (!t) return fail("未找到该队伍编号", 404); if (t.codeIssuedAt || t.status !== "draft") return fail("该队已由工作人员确认，不能再自行加入", 409); if (t.memberIds.length >= 3) return fail("该队已满 3 人", 409); t.memberIds.push(participant.id); participant.teamId = t.id; audit(s, { id: "participant", nickname: participant.nickname }, "team.self.joined", "team", t.id); return { team: t }; }
+function createSelfTeam(s: State, request: Request) { if (!s.event.gates.selfServiceTeam) return fail("当前未开放自助组队，请向工作人员出示现场编号", 409); const participant = participantForClient(s, request); if (!participant) return fail("请先完成登记", 403); if (participant.teamId) return fail("你已经在一支队伍中", 409); const t = teamRecord(s, [participant.id]); s.teams.push(t); participant.teamId = t.id; audit(s, { id: "participant", nickname: participant.nickname }, "team.self.created", "team", t.id); return { team: t }; }
+async function joinSelfTeam(s: State, request: Request) { if (!s.event.gates.selfServiceTeam) return fail("当前未开放自助组队，请向工作人员出示现场编号", 409); const participant = participantForClient(s, request); const b = await body(request); const t = teamByNumber(s, b.teamNumber); if (!participant) return fail("请先完成登记", 403); if (participant.teamId) return fail("你已经在一支队伍中", 409); if (!t) return fail("未找到该队伍编号", 404); if (t.codeIssuedAt || t.status !== "draft") return fail("该队已由工作人员确认，不能再自行加入", 409); if (t.memberIds.length >= 3) return fail("该队已满 3 人", 409); t.memberIds.push(participant.id); participant.teamId = t.id; audit(s, { id: "participant", nickname: participant.nickname }, "team.self.joined", "team", t.id); return { team: t }; }
 
 function configuredAccounts(_s: State, env: Env) { try { const parsed = JSON.parse(env.STAFF_PINS || ""); return Array.isArray(parsed) && parsed.some((a: any) => a?.enabled !== false && text(a?.pin, 120)) ? parsed : []; } catch { return []; } }
 async function createStaffSession(s: State, request: Request, env: Env) {
@@ -191,7 +194,20 @@ function publicTournament(s: State) {
 }
 function groupFixtures(groups: any[]) { const matches: any[] = []; groups.forEach((group) => { for (let a = 0; a < group.teamIds.length; a += 1) for (let bIndex = a + 1; bIndex < group.teamIds.length; bIndex += 1) matches.push({ id: id(), stage: "group", groupId: group.id, teamAId: group.teamIds[a], teamBId: group.teamIds[bIndex], status: "ready", scoreA: null, scoreB: null, winnerId: null }); }); return matches; }
 
-async function makeTeam(s: State, request: Request, actor: Staff) { const b = await body(request); const memberIds = ids(b.memberIds); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人"); const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId)); if (members.some((p) => !p || p.teamId)) return fail("成员不存在或已在其他队伍中", 409); const t = teamRecord(s, memberIds); s.teams.push(t); members.forEach((p: any) => { p.teamId = t.id; }); audit(s, actor, "team.created", "team", t.id); return { team: t }; }
+async function makeTeam(s: State, request: Request, actor: Staff) {
+  const b = await body(request); const memberIds = ids(b.memberIds); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人");
+  const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId)); if (members.some((p) => !p)) return fail("成员不存在", 404);
+  const sourceTeams = [...new Set(members.map((p: any) => p.teamId).filter(Boolean))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  if (sourceTeams.some((source: any) => source.codeIssuedAt || source.workshopCodeId)) return fail("已领取 Code 的队伍请通过调度面板处理成员变更", 409);
+  const retained = sourceTeams.find((source: any) => source.status !== "dissolved" && source.status === "draft") || null;
+  const t = retained || teamRecord(s, []);
+  const finalMemberIds = [...new Set([...t.memberIds, ...memberIds])]; if (finalMemberIds.length > 3) return fail("每队必须为 1–3 人");
+  if (!retained) s.teams.push(t);
+  sourceTeams.filter((source: any) => source.id !== t.id).forEach((source: any) => { source.memberIds = source.memberIds.filter((memberId: string) => !memberIds.includes(memberId)); });
+  t.memberIds = finalMemberIds; members.forEach((p: any) => { p.teamId = t.id; });
+  sourceTeams.filter((source: any) => source.id !== t.id && !source.memberIds.length).forEach((source: any) => dissolveTeam(s, source, "dissolve", actor));
+  audit(s, actor, retained ? "team.members.updated" : "team.created", "team", t.id); return { team: t };
+}
 function codeDissolutionAction(value: unknown) { return ["keep", "reclaim", "dissolve"].includes(text(value, 20)) ? text(value, 20) : ""; }
 function dissolveTeam(s: State, t: any, action: string, actor: Staff) {
   if (t.status === "dissolved") return;
@@ -243,9 +259,14 @@ async function updateTeam(s: State, value: string, request: Request, actor: Staf
   if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404);
   if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人");
   const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId));
-  if (members.some((p: any) => !p || (p.teamId && p.teamId !== t.id))) return fail("成员不存在或已在其他队伍中", 409);
-  s.participants.filter((p: any) => p.teamId === t.id && !memberIds.includes(p.id)).forEach((p: any) => { p.teamId = null; });
+  if (members.some((p: any) => !p)) return fail("成员不存在", 404);
+  const selectedIds = new Set(memberIds);
+  const sourceTeams = [...new Set(members.map((p: any) => p.teamId).filter((teamId: string | null) => teamId && teamId !== t.id))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  if (sourceTeams.some((source: any) => source.codeIssuedAt || source.workshopCodeId)) return fail("已领取 Code 的队伍请通过调度面板处理成员变更", 409);
+  s.participants.filter((p: any) => p.teamId === t.id && !selectedIds.has(p.id)).forEach((p: any) => { p.teamId = null; });
+  sourceTeams.forEach((source: any) => { source.memberIds = source.memberIds.filter((memberId: string) => !selectedIds.has(memberId)); });
   members.forEach((p: any) => { p.teamId = t.id; }); t.memberIds = memberIds; grantCurrentCodeVisibility(t, members);
+  sourceTeams.filter((source: any) => !source.memberIds.length).forEach((source: any) => dissolveTeam(s, source, "dissolve", actor));
   audit(s, actor, "team.members.updated", "team", t.id, text(b.reason, 120)); return { team: t };
 }
 function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404); if (t.workshopCodeId) return fail("已关联 Code 的队伍需要在解散弹窗中选择保留或回收", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; }); t.memberIds = []; dissolveTeam(s, t, "dissolve", actor); return { removedTeamId: t.id }; }
