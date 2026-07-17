@@ -62,6 +62,8 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(participant, /创建一个队伍/);
   assert.match(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
+  assert.match(participant, /team\?\.teamNumber/);
+  assert.doesNotMatch(participant, /officialLabel/);
   assert.doesNotMatch(participant, /邀请码/);
   assert.match(staff, /现场/);
   assert.match(staff, /组队/);
@@ -208,4 +210,34 @@ test("staff can adjust a draft team and run a frozen group-to-knockout tournamen
   assert.equal(rejectedSwap.response.status, 409);
   const knockout = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, admin, body: {} });
   assert.equal(knockout.response.status, 200); assert.equal(knockout.data.tournament.knockoutMatches.length, 1);
+});
+
+test("group standings calculate goal difference and keep T-numbers in every fixture", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1(); const people = [];
+  for (let index = 0; index < 3; index += 1) people.push(await call(worker, db, "/api/participants", { method: "POST", client: `goal-phone-${index}`, body: { nickname: `净胜球${index}`, supportProfile: {} } }));
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "积分 TA" } });
+  const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const teams = [];
+  for (const person of people) teams.push((await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } })).data.team);
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { codes: ["GD-1", "GD-2", "GD-3"] } });
+  for (const item of teams) {
+    await call(worker, db, `/api/ops/teams/${item.id}/issue-code`, { method: "POST", staff, body: {} });
+    await call(worker, db, `/api/ops/qualification/teams/${item.id}/confirm`, { method: "POST", staff, body: {} });
+  }
+  await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((item) => item.id) } });
+  const generated = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 1, qualifiersPerGroup: 1 } });
+  assert.deepEqual(generated.data.tournament.matches.map((match) => [match.teamALabel, match.teamBLabel]), [["T-001", "T-002"], ["T-001", "T-003"], ["T-002", "T-003"]]);
+
+  const scores = [[3, 1], [0, 2], [1, 0]];
+  let result;
+  for (const [index, match] of generated.data.tournament.matches.entries()) result = await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: scores[index][0], scoreB: scores[index][1] } });
+  const rows = result.data.tournament.groups[0].standings;
+  assert.deepEqual(rows.map((row) => row.label), ["T-003", "T-001", "T-002"]);
+  assert.deepEqual(rows.map((row) => ({ label: row.label, points: row.points, goalsFor: row.goalsFor, goalsAgainst: row.goalsAgainst, goalDifference: row.goalDifference })), [
+    { label: "T-003", points: 3, goalsFor: 2, goalsAgainst: 1, goalDifference: 1 },
+    { label: "T-001", points: 3, goalsFor: 3, goalsAgainst: 3, goalDifference: 0 },
+    { label: "T-002", points: 3, goalsFor: 2, goalsAgainst: 3, goalDifference: -1 },
+  ]);
+  const display = await call(worker, db, "/api/display");
+  assert.deepEqual(display.data.tournament.groups[0].standings.map((row) => row.label), ["T-003", "T-001", "T-002"]);
 });

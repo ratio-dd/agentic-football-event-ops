@@ -2,6 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 const localChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const launchOptions = process.env.CI ? {} : { executablePath: localChrome };
+const e2ePort = Number(process.env.E2E_PORT || "4173");
+const e2eBaseUrl = `http://localhost:${e2ePort}`;
 
 // Playwright's local web-server readiness check must never use a workstation
 // proxy for loopback traffic.
@@ -17,7 +19,7 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   use: {
-    baseURL: "http://localhost:4173",
+    baseURL: e2eBaseUrl,
     browserName: "chromium",
     // CI uses Playwright-managed Chromium; the local workflow intentionally
     // keeps using the user's installed Chrome for realistic desktop checks.
@@ -26,14 +28,14 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
+    command: `npm run dev -- --hostname 127.0.0.1 --port ${e2ePort}`,
     env: {
       ...process.env,
       PLAYWRIGHT_E2E: "1",
       STAFF_PINS: JSON.stringify([{ id: "e2e-staff", pin: "meetup-staff", enabled: true }]),
       ADMIN_PIN: "meetup-admin",
     },
-    url: "http://localhost:4173/",
+    url: `${e2eBaseUrl}/`,
     // Reusing a manually started server can accidentally pick up real local
     // workshop state and omit the test-only bindings above.
     reuseExistingServer: false,

@@ -2,7 +2,7 @@ const root = document.querySelector("#display-app");
 const e = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
 function matchLine(match) { const score = match.status === "completed" ? `${match.scoreA} : ${match.scoreB}` : "vs"; return `<li><span>${e(match.teamALabel)} <strong>${score}</strong> ${e(match.teamBLabel)}</span><small>${match.status === "completed" ? "已结束" : "待进行"}</small></li>`; }
-function standings(group) { return `<section class="display-group"><h2>${e(group.id)} 组积分榜</h2><table><thead><tr><th>队伍</th><th>赛</th><th>净</th><th>分</th></tr></thead><tbody>${group.standings.map((row) => `<tr><td>${e(row.label)}</td><td>${row.played}</td><td>${row.goalDifference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}</tbody></table></section>`; }
+function standings(group) { return `<section class="display-group"><h2>${e(group.id)} 组积分榜</h2><table><thead><tr><th>队伍</th><th>赛</th><th>净胜球</th><th>分</th></tr></thead><tbody>${group.standings.map((row) => `<tr><td>${e(row.label)}</td><td>${row.played}</td><td>${row.goalDifference}</td><td><strong>${row.points}</strong></td></tr>`).join("")}</tbody></table></section>`; }
 function bracket(match) { const score = match.status === "completed" ? `${match.scoreA} : ${match.scoreB}` : match.status === "bye" ? "轮空晋级" : "待进行"; return `<article class="bracket-match"><small>第 ${match.round} 轮</small><strong>${e(match.teamALabel)} <span>${score}</span> ${e(match.teamBLabel)}</strong></article>`; }
 
 function render(data) {
