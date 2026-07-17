@@ -181,7 +181,7 @@ test("Staff list rows keep readable colors across normal, selected, full, hover,
   await expectControlStatesReadable(page.getByRole("button", { name: "移出" }).first(), "成员移出操作");
 });
 
-test("participant ticket labels remain readable on the resource card", async ({ page }) => {
+test("participant ticket labels remain readable on team and resource cards", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("昵称", { exact: true }).fill(`票根颜色${Date.now()}`);
   await page.getByRole("button", { name: "完成登记" }).click();
@@ -192,6 +192,20 @@ test("participant ticket labels remain readable on the resource card", async ({ 
     background: getComputedStyle(element.parentElement!).backgroundColor,
   }));
   expect(contrast(colors.foreground, colors.background)).toBeGreaterThanOrEqual(4.5);
+  await page.evaluate(() => {
+    document.querySelector(".participant-content")?.insertAdjacentHTML("beforeend", `
+      <section class="participant-ticket participant-code-card contrast-code-card">
+        <div class="code-ticket-head contrast-code-header"><span>Team Code</span><button type="button" class="ticket-copy">⧉</button></div>
+      </section>
+    `);
+  });
+  const resourceHeader = page.locator(".contrast-code-header");
+  await expect(resourceHeader).toHaveCount(1);
+  const resourceHeaderColors = await resourceHeader.evaluate((element) => ({
+    foreground: getComputedStyle(element.querySelector("span")!).color,
+    background: getComputedStyle(element).backgroundColor,
+  }));
+  expect(contrast(resourceHeaderColors.foreground, resourceHeaderColors.background)).toBeGreaterThanOrEqual(4.5);
   await expectControlStatesReadable(page.getByRole("button", { name: "我的二维码" }), "参与者二维码操作");
   await expectControlStatesReadable(page.getByRole("button", { name: "反馈" }), "参与者反馈操作");
 });

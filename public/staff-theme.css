@@ -94,8 +94,11 @@
   border: 2px solid var(--ops-charcoal);
   border-top: 0;
   border-radius: 0 0 8px 8px;
+  background-color: var(--ops-ink);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, .08), transparent 25%),
+    radial-gradient(circle at 14px 15px, rgba(255,253,242,.18) 0 2px, transparent 2.7px) 0 0 / 20px 20px,
+    radial-gradient(circle at calc(100% - 36px) 22px, rgba(93,183,255,.72) 0 3px, transparent 3.8px),
+    linear-gradient(108deg, var(--ops-ink), var(--ops-green)),
     var(--ops-ink);
   color: #fffdf2;
   box-shadow: 0 4px 0 rgba(15, 61, 46, .18);
