@@ -71,14 +71,14 @@ test("Staff sees an actionable QR result and can return to manual search", async
   await expect(page.getByLabel("查找人员")).toBeVisible();
 });
 
-test("participant receives a draft team at registration without self-service controls", async ({ page }) => {
+test("participant registration waits for Staff allocation without a T-number", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("昵称", { exact: true }).fill(`自动编组体验员${Date.now()}`);
   await page.getByRole("button", { name: "完成登记" }).click();
 
-  await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
-  await expect(page.getByText(/T-\d{3}/)).toBeVisible();
-  await expect(page.getByText("工作人员正在确认队伍。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "等待工作人员安排队伍" })).toBeVisible();
+  await expect(page.getByText("队伍编号", { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/T-\d{3}/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /创建一个队伍|加入队伍/ })).toHaveCount(0);
   await expect(page.getByText("队长", { exact: true })).toHaveCount(0);
 });

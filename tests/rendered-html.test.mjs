@@ -108,17 +108,20 @@ test("shared deployment fails closed without configured Staff and administrator 
   assert.equal(registered.response.status, 200);
 });
 
-test("registration creates a single-person draft team before Staff merges overflow", async () => {
+test("registration enters the free-person pool without creating a draft team", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
   for (let index = 1; index <= 40; index += 1) {
     const registered = await call(worker, db, "/api/participants", { method: "POST", client: `auto-team-${index}`, body: { nickname: `自动队${index}`, supportProfile: {} } });
     assert.equal(registered.response.status, 200);
-    assert.equal(registered.data.team.memberIds.length, 1);
+    assert.equal(registered.data.team, null);
+    assert.equal(registered.data.participant.teamId, null);
+    assert.equal(registered.data.participant.allocationSource, "free");
   }
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "编组 TA" } });
   const state = await call(worker, db, "/api/ops/state", { staff: login.data.staffSession });
   assert.equal(state.data.participants.length, 40);
-  assert.equal(state.data.teams.filter((team) => team.status !== "dissolved").length, 40);
+  assert.equal(state.data.teams.filter((team) => team.status !== "dissolved").length, 0);
+  assert.equal(state.data.allocation.freePeople.length, 40);
   assert.equal(state.data.event.maxWorkshopTeams, 32);
 });
 
