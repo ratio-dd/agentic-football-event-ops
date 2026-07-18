@@ -8,8 +8,9 @@
   }
 }
 
-:443 {
-  tls /etc/letsencrypt/live/agentic-football-feedback-ip/fullchain.pem /etc/letsencrypt/live/agentic-football-feedback-ip/privkey.pem
+# The public AFC hostname CNAMEs to the Lightsail Static IP's AWS hostname.
+# Caddy obtains and renews its trusted public certificate automatically.
+afc.awscommunity.cn {
   encode zstd gzip
   reverse_proxy app:8787
 }
