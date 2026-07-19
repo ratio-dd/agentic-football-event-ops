@@ -91,6 +91,7 @@ const api = {
   splitManualTeam: (teamId, groups, confirmationNote) => request(`/api/ops/teams/${teamId}/split`, { method: "POST", body: { groups, confirmationNote }, staff: true }),
   releaseManualMembers: (teamId, memberIds, confirmationNote) => request(`/api/ops/teams/${teamId}/release`, { method: "POST", body: { memberIds, confirmationNote }, staff: true }),
   confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
+  updateTeamStatus: (teamId, status) => request(`/api/ops/teams/${teamId}/status`, { method: "PUT", body: { status }, staff: true }),
   updateEventGates: (gates) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true }),
   importResourceCodes: ({ workshopCodes, gamePortalCodes }) => request("/api/ops/codes/import", { method: "POST", body: { workshopCodes, gamePortalCodes }, staff: true }),
   backfillGamePortalCodes: () => request("/api/admin/codes/game-portal/backfill", { method: "POST", body: {}, staff: true }),

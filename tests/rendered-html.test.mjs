@@ -43,6 +43,8 @@ test("onsite state machine keeps team assignment in the Staff workflow", async (
   assert.match(worker, /\/api\/participants\/rebind/);
   assert.match(worker, /\/api\/ops\/codes\/import/);
   assert.match(worker, /\/api\/admin\/codes\/game-portal\/backfill/);
+  assert.match(worker, /updateTeamStatus\(s, teamId\(pathname\)/);
+  assert.match(worker, /function updateTeamStatus/);
   assert.match(worker, /issueCode\(s, teamId\(pathname\)/);
   assert.match(worker, /codeVisibleClientIds/);
   assert.match(worker, /qualificationStatus = "ta_qualified"/);
@@ -91,6 +93,10 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(staff, /data-detail-key/);
   assert.match(staff, /team-board-search/);
   assert.match(staff, /Workshop Code：\$\{team\.workshopCode/);
+  assert.match(staff, /team-status-override/);
+  assert.match(staff, /copy-team-code/);
+  assert.match(staff, /data-code-kind="Workshop Team Code"/);
+  assert.match(staff, /data-code-kind="Game Portal Code"/);
   assert.match(staff, /competition-group-filter/);
   assert.match(staff, /data-draft-scope="match:/);
   assert.match(staff, /容量不足/);
@@ -152,6 +158,14 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   assert.equal(imported.response.status, 200);
   const issued = await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issued.response.status, 200);
+  const qualifiedManually = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
+  assert.equal(qualifiedManually.response.status, 200);
+  assert.equal(qualifiedManually.data.team.status, "ta_qualified");
+  const restoredToWorkshop = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "issued" } });
+  assert.equal(restoredToWorkshop.response.status, 200);
+  assert.equal(restoredToWorkshop.data.team.status, "issued");
+  const cannotReturnToCodeQueue = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ready_code" } });
+  assert.equal(cannotReturnToCodeQueue.response.status, 409);
   const afterFirst = await call(worker, db, "/api/state", { client: "pair-code-a" });
   assert.equal(afterFirst.data.currentTeam.workshopCode, "WORKSHOP-001");
   assert.equal(afterFirst.data.currentTeam.gamePortalCode, null);

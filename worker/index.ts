@@ -46,6 +46,7 @@ const worker = {
       if (/^\/api\/ops\/teams\/[^/]+\/members$/.test(pathname) && request.method === "PUT") return mutation(env, request, (s) => updateTeam(s, teamId(pathname), request, staff));
       if (/^\/api\/ops\/teams\/[^/]+$/.test(pathname) && request.method === "DELETE") return mutation(env, request, (s) => removeTeam(s, teamId(pathname), staff));
       if (/^\/api\/ops\/teams\/[^/]+\/confirm$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => confirmTeam(s, teamId(pathname), staff));
+      if (/^\/api\/ops\/teams\/[^/]+\/status$/.test(pathname) && request.method === "PUT") return mutation(env, request, (s) => updateTeamStatus(s, teamId(pathname), request, staff));
       if (pathname === "/api/ops/codes/import" && request.method === "POST") return admin ? mutation(env, request, (s) => importCodes(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/event-links" && request.method === "PUT") return admin ? mutation(env, request, (s) => setEventLinks(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/admin/codes/game-portal/backfill" && request.method === "POST") return admin ? mutation(env, request, (s) => backfillGamePortalCodes(s, admin)) : json({ error: "需要管理后台权限" }, 403);
@@ -419,6 +420,17 @@ async function releaseManualMembers(s: State, value: string, request: Request, a
 }
 function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404); if (teamHasIssuedCodes(t)) return fail("已关联 Code 的队伍需要在解散弹窗中选择保留或回收", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; p.allocationSource = "free"; }); t.memberIds = []; t.coreMemberIds = []; t.allocatedMemberIds = []; dissolveTeam(s, t, "dissolve", actor); return { removedTeamId: t.id }; }
 function confirmTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (teamHasIssuedCodes(t)) return { team: t }; t.status = "ready_code"; audit(s, actor, "team.confirmed", "team", t.id); return { team: t }; }
+async function updateTeamStatus(s: State, value: string, request: Request, actor: Staff) {
+  const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404);
+  const next = text((await body(request)).status, 40); const allowed = ["draft", "ready_code", "issued", "ta_qualified"];
+  if (!allowed.includes(next)) return fail("状态无效", 400);
+  if (["issued", "ta_qualified"].includes(next) && !t.workshopCodeId) return fail("未发放 Workshop Code 的队伍不能设为 Workshop 中或可参赛", 409);
+  if (["draft", "ready_code"].includes(next) && t.workshopCodeId) return fail("已发放 Workshop Code 的队伍不能退回待发码状态；请保留资源关系后使用 Workshop 中或可参赛", 409);
+  t.status = next;
+  if (next === "ta_qualified") { t.qualificationStatus = "ta_qualified"; t.qualifiedAt = t.qualifiedAt || now(); t.workshopStatus = "in_progress"; }
+  else { t.qualificationStatus = "not_qualified"; t.qualifiedAt = null; if (next === "issued") t.workshopStatus = "in_progress"; else t.workshopStatus = "not_started"; }
+  audit(s, actor, "team.status.updated", "team", t.id, next); return { team: t };
+}
 async function importCodes(s: State, request: Request, actor: Staff) {
   const b = await body(request);
   const parse = (values: unknown) => [...new Set((Array.isArray(values) ? values : []).map((value: unknown) => text(value, 160)).filter(Boolean))];
