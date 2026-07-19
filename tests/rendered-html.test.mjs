@@ -89,6 +89,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(staff, /allocation-drawer/);
   assert.match(staff, /data-detail-key/);
   assert.match(staff, /team-board-search/);
+  assert.match(staff, /Workshop Code：\$\{team\.workshopCode/);
   assert.match(staff, /competition-group-filter/);
   assert.match(staff, /data-draft-scope="match:/);
   assert.match(staff, /容量不足/);
