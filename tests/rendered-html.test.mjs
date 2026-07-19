@@ -65,7 +65,8 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.doesNotMatch(participant, /创建一个队伍/);
   assert.doesNotMatch(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
-  assert.match(participant, /team\?\.teamNumber/);
+  assert.match(participant, /competitionForTeam/);
+  assert.match(participant, /净胜球/);
   assert.doesNotMatch(participant, /officialLabel/);
   assert.doesNotMatch(participant, /邀请码/);
   assert.match(staff, /现场/);
@@ -79,16 +80,28 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(app, /\/staff/);
   assert.match(app, /formDraft/);
   assert.match(app, /restoreDrafts/);
+  assert.match(app, /captureInputFocus/);
+  assert.match(app, /field\.value/);
   assert.match(staff, /controls\.ui\.tab/);
   assert.match(staff, /selectedPersonIds/);
   assert.match(staff, /grouping-tabs/);
+  assert.match(staff, /allocation-drawer/);
+  assert.match(staff, /data-detail-key/);
+  assert.match(staff, /team-board-search/);
+  assert.match(staff, /competition-group-filter/);
+  assert.match(staff, /data-draft-scope="match:/);
   assert.match(staff, /容量不足/);
   assert.match(staff, /Admin 可在资源管理中回收/);
   assert.doesNotMatch(staff, /name="codeId"/);
+  const staffCompetition = staff.slice(staff.indexOf("function staffCompetition"), staff.indexOf("function staffScoreForm"));
+  assert.match(staffCompetition, /第 \$\{round\} 轮/);
+  assert.doesNotMatch(staffCompetition, /积分榜/);
   assert.match(css, /\.bottom-tabs/);
   assert.match(css, /bottom-tabs-four/);
   assert.match(await read("public/admin-panel.js"), /请从 Staff 工作台进入/);
   assert.match(app, /competition\/swap/);
+  assert.match(app, /acceptanceClient/);
+  assert.match(app, /127\.0\.0\.1/);
   assert.match(await read("public/display.js"), /下一场/);
 });
 
@@ -228,6 +241,9 @@ test("staff can adjust a draft team and run a frozen group-to-knockout tournamen
   assert.equal(rejectedSwap.response.status, 409);
   const knockout = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, admin, body: {} });
   assert.equal(knockout.response.status, 200); assert.equal(knockout.data.tournament.knockoutMatches.length, 1);
+  const lockedGroupResult = await call(worker, db, `/api/ops/matches/${swapped.data.tournament.matches[0].id}/result`, { method: "POST", staff, body: { scoreA: 0, scoreB: 3 } });
+  assert.equal(lockedGroupResult.response.status, 409);
+  assert.match(lockedGroupResult.data.error, /小组赛赛果已锁定/);
 });
 
 test("group standings calculate goal difference and keep T-numbers in every fixture", async () => {
@@ -244,18 +260,52 @@ test("group standings calculate goal difference and keep T-numbers in every fixt
   }
   await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((item) => item.id) } });
   const generated = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 1, qualifiersPerGroup: 1 } });
-  assert.deepEqual(generated.data.tournament.matches.map((match) => [match.teamALabel, match.teamBLabel]), [["T-001", "T-002"], ["T-001", "T-003"], ["T-002", "T-003"]]);
+  assert.deepEqual(generated.data.tournament.matches.map((match) => [match.round, match.teamALabel, match.teamBLabel]), [[1, "T-002", "T-003"], [2, "T-001", "T-003"], [3, "T-001", "T-002"]]);
 
   const scores = [[3, 1], [0, 2], [1, 0]];
   let result;
   for (const [index, match] of generated.data.tournament.matches.entries()) result = await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: scores[index][0], scoreB: scores[index][1] } });
   const rows = result.data.tournament.groups[0].standings;
-  assert.deepEqual(rows.map((row) => row.label), ["T-003", "T-001", "T-002"]);
+  assert.deepEqual(rows.map((row) => row.label), ["T-002", "T-003", "T-001"]);
   assert.deepEqual(rows.map((row) => ({ label: row.label, points: row.points, goalsFor: row.goalsFor, goalsAgainst: row.goalsAgainst, goalDifference: row.goalDifference })), [
-    { label: "T-003", points: 3, goalsFor: 2, goalsAgainst: 1, goalDifference: 1 },
-    { label: "T-001", points: 3, goalsFor: 3, goalsAgainst: 3, goalDifference: 0 },
-    { label: "T-002", points: 3, goalsFor: 2, goalsAgainst: 3, goalDifference: -1 },
+    { label: "T-002", points: 3, goalsFor: 3, goalsAgainst: 2, goalDifference: 1 },
+    { label: "T-003", points: 3, goalsFor: 3, goalsAgainst: 3, goalDifference: 0 },
+    { label: "T-001", points: 3, goalsFor: 1, goalsAgainst: 2, goalDifference: -1 },
   ]);
   const display = await call(worker, db, "/api/display");
-  assert.deepEqual(display.data.tournament.groups[0].standings.map((row) => row.label), ["T-003", "T-001", "T-002"]);
+  assert.deepEqual(display.data.tournament.groups[0].standings.map((row) => row.label), ["T-002", "T-003", "T-001"]);
+});
+
+test("round-robin scheduling gives every team at most one group match per round", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1(); const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "赛程 TA" } });
+  const staff = login.data.staffSession; const admin = await elevate(worker, db, staff); const teams = [];
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { codes: Array.from({ length: 30 }, (_, index) => `ROUND-${index + 1}`) } });
+  for (let index = 1; index <= 30; index += 1) {
+    const person = await call(worker, db, "/api/participants", { method: "POST", client: `round-phone-${index}`, body: { nickname: `轮次队${index}`, supportProfile: {} } });
+    const team = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } });
+    teams.push(team.data.team);
+    await call(worker, db, `/api/ops/teams/${team.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+    await call(worker, db, `/api/ops/qualification/teams/${team.data.team.id}/confirm`, { method: "POST", staff, body: {} });
+  }
+  await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((team) => team.id) } });
+  const generated = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 8, qualifiersPerGroup: 2 } });
+  assert.equal(generated.response.status, 200);
+  const tournament = generated.data.tournament;
+  assert.deepEqual(tournament.groups.map((group) => group.teamIds.length), [4, 4, 4, 4, 4, 4, 3, 3]);
+  assert.equal(tournament.matches.length, 42);
+  assert.deepEqual(tournament.matches.map((match) => match.round), [...tournament.matches.map((match) => match.round)].sort((first, second) => first - second));
+  assert.deepEqual([1, 2, 3].map((round) => tournament.matches.filter((match) => match.round === round).length), [14, 14, 14]);
+  for (const group of tournament.groups) {
+    const groupMatches = tournament.matches.filter((match) => match.groupId === group.id);
+    // Odd groups use a rotating bye, so three teams need three rounds rather
+    // than two; every team still faces every other team exactly once.
+    const expectedRounds = group.teamIds.length % 2 === 0 ? group.teamIds.length - 1 : group.teamIds.length;
+    assert.deepEqual([...new Set(groupMatches.map((match) => match.round))], Array.from({ length: expectedRounds }, (_, index) => index + 1));
+    assert.equal(groupMatches.length, group.teamIds.length * (group.teamIds.length - 1) / 2);
+    for (let round = 1; round <= expectedRounds; round += 1) {
+      const matches = groupMatches.filter((match) => match.round === round);
+      const seen = matches.flatMap((match) => [match.teamAId, match.teamBId]);
+      assert.equal(new Set(seen).size, seen.length, `${group.id} 组第 ${round} 轮不应有重复队伍`);
+    }
+  }
 });

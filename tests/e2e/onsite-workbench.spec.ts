@@ -15,6 +15,18 @@ test("参与者问卷在自动刷新后保留尚未提交的选择", async ({ pa
   await expect(page.getByLabel("是否做过 AWS Workshop")).toHaveValue("yes");
 });
 
+test("参与者恢复状态面板在自动刷新后保持展开", async ({ page }) => {
+  await page.goto("/");
+  const restorePanel = page.locator(".ticket-details");
+  await restorePanel.locator("summary").click();
+  await expect(restorePanel).toHaveAttribute("open", "");
+
+  await page.waitForTimeout(5_500);
+
+  await expect(restorePanel).toHaveAttribute("open", "");
+  await expect(page.getByLabel("原昵称")).toBeVisible();
+});
+
 test("Staff stays on the selected daily-work tab after polling refresh", async ({ page }) => {
   await page.goto("/staff");
   await page.getByLabel("工作台 PIN").fill("meetup-staff");
@@ -29,6 +41,23 @@ test("Staff stays on the selected daily-work tab after polling refresh", async (
   await expect(page.getByRole("button", { name: "Workshop", exact: true })).toHaveClass(/active/);
   await expect(page.getByRole("heading", { name: /待 TA 确认/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
+});
+
+test("Staff keeps automatic allocation open after polling refresh", async ({ page }) => {
+  await page.goto("/staff");
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill("分配面板 E2E");
+  await page.getByRole("button", { name: "进入工作台" }).click();
+  await page.getByRole("button", { name: "组队", exact: true }).click();
+
+  const drawer = page.locator(".allocation-drawer");
+  await drawer.locator(":scope > summary").click();
+  await expect(drawer).toHaveAttribute("open", "");
+
+  await page.waitForTimeout(5_500);
+
+  await expect(drawer).toHaveAttribute("open", "");
+  await expect(page.getByRole("button", { name: "生成自动分配预览" })).toBeVisible();
 });
 
 test("Staff sees an actionable QR result and can return to manual search", async ({ page, request }, testInfo) => {
@@ -116,7 +145,7 @@ test("Staff creates a new team with one final confirmation and immediate pending
   const stateResponse = await request.get("/api/ops/state", { headers: { "x-staff-session": stateSession } });
   expect(stateResponse.ok()).toBeTruthy();
   const state = await stateResponse.json();
-  const createdTeam = state.teams.find((team: any) => team.memberIds.includes(participant.id));
+  const createdTeam = state.teams.find((team: { memberIds: string[] }) => team.memberIds.includes(participant.id));
   expect(createdTeam).toBeTruthy();
   expect(createdTeam.memberIds).toEqual([participant.id]);
 });
@@ -174,8 +203,8 @@ test("Staff can move people from either board and sees capacity before a batch d
   await expect(page.getByText("人员与队伍关系已更新。")).toBeVisible();
 
   const moved = await call("/api/ops/state", "GET", undefined, staffHeaders);
-  expect(moved.participants.find((person: any) => person.id === people[0].id).teamId).toBe(teamB.id);
-  expect(moved.teams.find((team: any) => team.id === teamA.id).status).toBe("dissolved");
+  expect(moved.participants.find((person: { id: string; teamId: string }) => person.id === people[0].id).teamId).toBe(teamB.id);
+  expect(moved.teams.find((team: { id: string; status: string }) => team.id === teamA.id).status).toBe("dissolved");
 
   const teamsTab = page.locator('[data-grouping-tab="teams"]');
   await expect(teamsTab).toHaveCount(1); await teamsTab.click();

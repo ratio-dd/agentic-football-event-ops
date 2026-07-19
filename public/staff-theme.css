@@ -399,6 +399,38 @@
   color: var(--ops-charcoal);
 }
 
+/* On a phone, people and teams are the primary work surfaces. Allocation is a
+   deliberate second step, so it stays available without pushing dispatch
+   controls below the fold. */
+.staff-shell .grouping-workspace { display: grid; gap: 10px; }
+.staff-shell .grouping-workspace .grouping-tabs { margin: 0; }
+.staff-shell .allocation-drawer {
+  margin: 2px 0 0;
+  padding: 0;
+  border-top: 2px solid var(--ops-ink);
+  border-bottom: 2px solid var(--ops-ink);
+}
+.staff-shell .allocation-drawer > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 11px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.staff-shell .allocation-drawer > summary::-webkit-details-marker { display: none; }
+.staff-shell .allocation-drawer > summary strong,
+.staff-shell .allocation-drawer > summary small { display: block; }
+.staff-shell .allocation-drawer > summary strong { color: var(--ops-ink); }
+.staff-shell .allocation-drawer > summary small { margin-top: 3px; color: var(--ops-muted); font-size: 12px; }
+.staff-shell .allocation-drawer > summary > span:last-child { color: var(--ops-green); font-weight: 900; }
+.staff-shell .allocation-drawer[open] > summary { border-bottom: 1px dashed var(--ops-rule); }
+.staff-shell .allocation-drawer[open] > summary > span:last-child { transform: rotate(180deg); }
+.staff-shell .allocation-drawer-body { padding: 14px 0 18px; }
+.staff-shell .allocation-drawer-body > .hint { margin-top: 0; }
+
 .staff-shell .compact-list article,
 .staff-shell .search-row,
 .staff-shell .dispatch-person-row,
@@ -697,6 +729,8 @@
 
 .admin-shell .admin-form,
 .admin-shell .admin-subsection { margin-top: 20px; }
+.admin-shell .admin-flow-notice { margin: 0 0 18px; padding: 12px 14px; border: 2px solid var(--ops-ink); border-left: 7px solid var(--ops-green); border-radius: 4px; background: #e9f6e9; color: var(--ops-ink); font-weight: 780; }
+.admin-shell .admin-competition-links { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }.admin-shell .admin-competition-links a { display: inline-grid; min-height: 39px; place-items: center; padding: 0 12px; border: 2px solid var(--ops-ink); border-radius: 4px; background: #fffdf5; box-shadow: 2px 2px 0 var(--ops-ink); color: var(--ops-ink); font-weight: 800; text-decoration: none; }.admin-shell .admin-competition-links a:last-child { background: var(--ops-green); color: #fffdf2; }
 .admin-shell .admin-subsection { padding-top: 18px; border-top: 1px dashed var(--ops-rule); }
 .admin-shell .admin-subsection h3 { color: var(--ops-ink); }
 

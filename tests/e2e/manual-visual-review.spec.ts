@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
 
 const enabled = process.env.CAPTURE_VISUAL_REVIEW === "1";
 const ADMIN_PIN = "meetup-admin";
@@ -16,7 +16,7 @@ async function api(request: APIRequestContext, path: string, { method = "GET", s
   return response.json();
 }
 
-async function capture(page: Page, testInfo: any, name: string) {
+async function capture(page: Page, testInfo: TestInfo, name: string) {
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), {
       message: `截图 ${name} 前不应出现横向溢出`,
@@ -31,7 +31,6 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
   test("覆盖参与者、现场运营与大屏的全部主要页面状态", async ({ page, request }, testInfo) => {
     const stamp = Date.now();
     const participantName = `画廊参与者${stamp}`;
-    const clientId = `visual-review-client-${stamp}`;
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
@@ -46,7 +45,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     const elevated = await api(request, "/api/admin/session", { method: "POST", staff, body: { adminPin: ADMIN_PIN } });
     const admin = elevated.adminSession;
     const stateAfterRegistration = await api(request, "/api/ops/state", { staff });
-    const registeredParticipant = stateAfterRegistration.participants.find((person: any) => person.nickname === participantName);
+    const registeredParticipant = stateAfterRegistration.participants.find((person: { nickname?: string }) => person.nickname === participantName);
     const assigned = await api(request, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [registeredParticipant.id] } });
     const selfTeam = assigned.team;
     await page.reload();
@@ -63,12 +62,12 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await expect(page.getByText("已确认参加下午比赛", { exact: true })).toBeVisible();
     await capture(page, testInfo, "04a-participant-qualified");
 
-    const people: any[] = [];
+    const people: Array<{ id: string; staffShortId: string }> = [];
     for (let index = 1; index <= 5; index += 1) {
       const created = await api(request, "/api/participants", { method: "POST", client: `visual-review-${stamp}-${index}`, body: { nickname: `画廊人员${stamp}-${index}` } });
       people.push(created.participant);
     }
-    const teams: any[] = [];
+    const teams: Array<{ id: string; teamNumber: string }> = [];
     for (const person of people.slice(0, 4)) {
       teams.push((await api(request, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.id] } })).team);
     }
@@ -119,7 +118,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await page.getByRole("button", { name: "Workshop", exact: true }).click();
     await capture(page, testInfo, "12-staff-workshop");
     await page.getByRole("button", { name: "比赛", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "小组赛进行中" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "小组赛赛果录入" })).toBeVisible();
     await capture(page, testInfo, "14-staff-competition");
     await page.getByRole("button", { name: "更多", exact: true }).click();
     await page.getByLabel("Admin PIN").fill(ADMIN_PIN);

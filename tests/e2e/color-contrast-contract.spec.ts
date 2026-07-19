@@ -101,7 +101,7 @@ test("Staff list rows keep readable colors across normal, selected, full, hover,
   for (let index = 1; index <= 5; index += 1) {
     people.push((await api(request, "/api/participants", "POST", { nickname: `颜色人员${stamp}-${index}` }, { "x-client-id": `color-contract-${stamp}-${index}` })).participant);
   }
-  const fullTeam = (await api(request, "/api/ops/teams", "POST", { memberIds: people.slice(0, 3).map((person: any) => person.id) }, staffHeaders)).team;
+  const fullTeam = (await api(request, "/api/ops/teams", "POST", { memberIds: people.slice(0, 3).map((person: { id: string }) => person.id) }, staffHeaders)).team;
   await api(request, "/api/ops/teams", "POST", { memberIds: [people[3].id] }, staffHeaders);
 
   await page.goto("/staff");

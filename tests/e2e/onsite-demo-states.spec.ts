@@ -59,8 +59,8 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await page.screenshot({ path: testInfo.outputPath("participant-resource-links.png"), fullPage: true });
 });
 
-test("赛制级别操作拒绝普通 Staff，并由 Admin 会话完成", async ({ request }) => {
-  const stamp = Date.now(); const login = await staffSession(request, `Admin 边界 ${stamp}`); const admin = await adminSession(request, login.staffSession);
+test("Admin 冻结并生成赛程，Staff 录入赛果，参与者看到自己的积分和赛程", async ({ page, request }) => {
+  const stamp = Date.now(); const login = await staffSession(request, `Admin 边界 ${stamp}`);
   const people = [];
   for (let index = 1; index <= 2; index += 1) people.push(await api(request, "/api/participants", { method: "POST", client: `e2e-admin-${stamp}-${index}`, body: { nickname: `Admin边界${stamp}-${index}`, supportProfile: {} } }));
   const teams = [];
@@ -71,10 +71,34 @@ test("赛制级别操作拒绝普通 Staff，并由 Admin 会话完成", async (
   }
   const denied = await request.post("/api/ops/competition/freeze", { headers: { "x-staff-session": login.staffSession }, data: { teamIds: teams.map((item) => item.team.id) } });
   expect(denied.status()).toBe(403);
-  const frozen = await api(request, "/api/ops/competition/freeze", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { teamIds: teams.map((item) => item.team.id) } });
-  expect(frozen.competition.frozenTeamIds).toHaveLength(2);
-  const tournament = await api(request, "/api/ops/competition/generate", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { groupCount: 1, qualifiersPerGroup: 1 } });
-  expect(tournament.tournament.groups).toHaveLength(1);
+  await staffLogin(page, `赛事 Admin ${stamp}`);
+  await page.getByRole("button", { name: "更多", exact: true }).click();
+  await page.getByLabel("Admin PIN").fill("meetup-admin");
+  await page.getByRole("button", { name: "进入管理后台" }).click();
+  await page.getByRole("button", { name: "比赛管理" }).click();
+  await expect(page.getByRole("button", { name: "冻结名单" })).toBeVisible();
+  const selectedCount = await page.locator('#admin-freeze-roster input[name="teamId"]:checked').count();
+  await page.getByRole("button", { name: "冻结名单" }).click();
+  await expect(page.getByRole("heading", { name: `已冻结 ${selectedCount} 支队伍` })).toBeVisible();
+  await expect(page.locator(".admin-flow-notice")).toContainText("下一步：设置小组数量并生成小组赛");
+  await page.getByRole("button", { name: "生成小组赛" }).click();
+  await expect(page.getByRole("heading", { name: "小组赛已生成" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开 Staff 赛果录入" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "打开现场大屏" })).toBeVisible();
+
+  const state = await api(request, "/api/ops/state", { staff: login.staffSession });
+  const targetTeam = state.teams.find((team: { memberIds: string[]; id: string }) => team.memberIds.includes(people[0].participant.id));
+  const match = state.tournament.matches.find((candidate: { teamAId: string; teamBId: string }) => candidate.teamAId === targetTeam.id || candidate.teamBId === targetTeam.id);
+  const result = match.teamAId === targetTeam.id ? { scoreA: 2, scoreB: 0 } : { scoreA: 0, scoreB: 2 };
+  await api(request, `/api/ops/matches/${match.id}/result`, { method: "POST", staff: login.staffSession, body: result });
+  await page.evaluate(() => sessionStorage.clear());
+  await page.addInitScript((client) => localStorage.setItem("afc-event-ops-client", client), `e2e-admin-${stamp}-1`);
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "下午比赛", exact: true })).toBeVisible();
+  await expect(page.getByText("积分 3", { exact: true })).toBeVisible();
+  await expect(page.getByText("净胜球 +2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的赛程" })).toBeVisible();
+  await expect(page.getByText(`${result.scoreA} : ${result.scoreB}`, { exact: true })).toBeVisible();
 });
 
 test("Admin feedback inbox only appears after elevated session", async ({ page, request }) => {

@@ -4,7 +4,6 @@ import test from "node:test";
 // This file is intentionally independent from the implementation test suite.
 // It exercises the built Worker through its HTTP surface and uses new data for
 // every scenario described in workshop-team-allocation-acceptance-v1.md.
-const root = new URL("../", import.meta.url);
 const ENV = { STAFF_PINS: JSON.stringify([{ id: "acceptance-staff", pin: "acceptance-staff", enabled: true }]), ADMIN_PIN: "acceptance-admin" };
 
 class MemoryD1 {

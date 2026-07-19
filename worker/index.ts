@@ -203,7 +203,25 @@ function publicTournament(s: State) {
     knockoutMatches: (tournament.knockoutMatches || []).map((m: any) => ({ ...m, teamALabel: label(m.teamAId), teamBLabel: label(m.teamBId), winnerLabel: label(m.winnerId) })),
   };
 }
-function groupFixtures(groups: any[]) { const matches: any[] = []; groups.forEach((group) => { for (let a = 0; a < group.teamIds.length; a += 1) for (let bIndex = a + 1; bIndex < group.teamIds.length; bIndex += 1) matches.push({ id: id(), stage: "group", groupId: group.id, teamAId: group.teamIds[a], teamBId: group.teamIds[bIndex], status: "ready", scoreA: null, scoreB: null, winnerId: null }); }); return matches; }
+function groupFixtures(groups: any[]) {
+  const matches: any[] = [];
+  groups.forEach((group) => {
+    // Circle-method round robin: each group member appears at most once per
+    // round. Odd-sized groups receive a rotating bye by pairing with `null`.
+    const rotation = [...group.teamIds];
+    if (rotation.length % 2 === 1) rotation.push(null);
+    for (let round = 1; round < rotation.length; round += 1) {
+      for (let index = 0; index < rotation.length / 2; index += 1) {
+        const teamAId = rotation[index], teamBId = rotation[rotation.length - 1 - index];
+        if (teamAId && teamBId) matches.push({ id: id(), stage: "group", groupId: group.id, round, teamAId, teamBId, status: "ready", scoreA: null, scoreB: null, winnerId: null });
+      }
+      rotation.splice(1, 0, rotation.pop());
+    }
+  });
+  // Consumers render one event-wide timeline, so keep all group-round one
+  // fixtures together before moving to the next round.
+  return matches.sort((first, second) => first.round - second.round || first.groupId.localeCompare(second.groupId));
+}
 
 async function makeTeam(s: State, request: Request, actor: Staff) {
   const b = await body(request); const memberIds = ids(b.memberIds); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人");
@@ -452,7 +470,7 @@ function resolveKnockout(tournament: any) { const matches = tournament.knockoutM
 }
 async function generateKnockout(s: State, request: Request, actor: Staff) { const tournament = s.tournament; if (!tournament || tournament.status !== "group") return fail("请先生成并完成小组赛", 409); if (tournament.matches.some((m: any) => m.status !== "completed")) return fail("请先录入全部小组赛结果", 409); if (tournament.knockoutMatches?.length) return fail("淘汰赛已生成", 409); const qualified = tournament.groups.flatMap((group: any) => standings(s, tournament, group).slice(0, tournament.qualifiersPerGroup).map((row: any) => row.teamId)); if (qualified.length < 2) return fail("晋级队伍不足", 409); let bracketSize = 1; while (bracketSize < qualified.length) bracketSize *= 2; const seeds = [...qualified, ...Array(Math.max(0, bracketSize - qualified.length)).fill(null)]; const matches: any[] = []; let previous: any[] = []; for (let index = 0; index < bracketSize / 2; index += 1) previous.push({ id: id(), stage: "knockout", round: 1, teamAId: seeds[index], teamBId: seeds[bracketSize - 1 - index], sourceAId: null, sourceBId: null, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...previous); let round = 2; while (previous.length > 1) { const next: any[] = []; for (let index = 0; index < previous.length; index += 2) next.push({ id: id(), stage: "knockout", round, teamAId: null, teamBId: null, sourceAId: previous[index].id, sourceBId: previous[index + 1].id, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...next); previous = next; round += 1; } tournament.knockoutMatches = matches; tournament.status = "knockout"; resolveKnockout(tournament); audit(s, actor, "tournament.knockout.generated", "tournament", tournament.id, `${qualified.length} teams`); return { tournament: publicTournament(s) }; }
 async function voidTournament(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (!s.tournament) return fail("当前没有赛程", 409); const tournamentId = s.tournament.id; s.tournament = null; s.competition = { frozenTeamIds: [], frozenAt: null, frozenBy: null }; audit(s, actor, "tournament.voided", "tournament", tournamentId, text((await body(request)).reason, 120)); return { voidedTournamentId: tournamentId }; }
-async function recordResult(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const tournament = s.tournament; const m = tournament?.matches.find((x: any) => x.id === value) || tournament?.knockoutMatches?.find((x: any) => x.id === value); const a = Number(b.scoreA), z = Number(b.scoreB); if (!m || !Number.isInteger(a) || !Number.isInteger(z) || a < 0 || z < 0 || !m.teamAId || !m.teamBId) return fail("赛果无效", 400); if (m.stage === "knockout" && a === z) return fail("淘汰赛必须分出胜负，请重赛后录入", 409); m.scoreA = a; m.scoreB = z; m.status = "completed"; m.winnerId = a > z ? m.teamAId : z > a ? m.teamBId : null; if (m.stage === "knockout") resolveKnockout(tournament); audit(s, actor, "match.result.recorded", "match", m.id, `${a}:${z}`); return { match: m, tournament: publicTournament(s) }; }
+async function recordResult(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const tournament = s.tournament; const m = tournament?.matches.find((x: any) => x.id === value) || tournament?.knockoutMatches?.find((x: any) => x.id === value); const a = Number(b.scoreA), z = Number(b.scoreB); if (!m || !Number.isInteger(a) || !Number.isInteger(z) || a < 0 || z < 0 || !m.teamAId || !m.teamBId) return fail("赛果无效", 400); if (m.stage === "group" && tournament?.knockoutMatches?.length) return fail("淘汰赛已生成，小组赛赛果已锁定；如需更正，请先由 Admin 作废赛程并重新生成", 409); if (m.stage === "knockout" && a === z) return fail("淘汰赛必须分出胜负，请重赛后录入", 409); m.scoreA = a; m.scoreB = z; m.status = "completed"; m.winnerId = a > z ? m.teamAId : z > a ? m.teamBId : null; if (m.stage === "knockout") resolveKnockout(tournament); audit(s, actor, "match.result.recorded", "match", m.id, `${a}:${z}`); return { match: m, tournament: publicTournament(s) }; }
 
 function reclaimCode(s: State, value: string, actor: Staff) {
   const t = team(s, value); if (!t || t.status !== "dissolved" || !t.workshopCodeId) return fail("没有可回收的已消耗 Code", 409);

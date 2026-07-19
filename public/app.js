@@ -5,9 +5,12 @@ import { renderAdmin } from "./admin-panel.js";
 const CLIENT_KEY = "afc-event-ops-client";
 const STAFF_KEY = "afc-event-ops-staff";
 const ADMIN_KEY = "afc-event-ops-admin";
+const localAcceptanceClient = ["localhost", "127.0.0.1"].includes(location.hostname)
+  ? new URLSearchParams(location.search).get("acceptanceClient") || ""
+  : "";
 const app = document.querySelector("#app");
 const context = {
-  clientId: localStorage.getItem(CLIENT_KEY) || crypto.randomUUID(),
+  clientId: localAcceptanceClient || localStorage.getItem(CLIENT_KEY) || crypto.randomUUID(),
   staffSession: sessionStorage.getItem(STAFF_KEY) || "",
   adminSession: sessionStorage.getItem(ADMIN_KEY) || "",
   state: null,
@@ -23,9 +26,11 @@ const context = {
 localStorage.setItem(CLIENT_KEY, context.clientId);
 
 function draftKey(field) {
-  const form = field.closest("form")?.id || "surface";
+  const form = field.closest("form");
+  const scope = form?.dataset.draftScope || form?.id || "surface";
   const identity = field.name || field.id || (field.dataset.member ? `member:${field.value}` : "");
-  return identity ? `${location.pathname}|${form}|${identity}` : "";
+  const instance = field instanceof HTMLInputElement && ["checkbox", "radio"].includes(field.type) ? `|${field.value}` : "";
+  return identity ? `${location.pathname}|${scope}|${identity}${instance}` : "";
 }
 function saveDraft(event) {
   const field = event.target;
@@ -39,6 +44,19 @@ function restoreDrafts(root) {
     if ("checked" in draft && field instanceof HTMLInputElement) field.checked = draft.checked;
     else if ("value" in draft) field.value = draft.value;
   });
+}
+function captureInputFocus() {
+  const field = document.activeElement;
+  if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) return null;
+  const key = draftKey(field); if (!key) return null;
+  return { key, start: field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement ? field.selectionStart : null, end: field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement ? field.selectionEnd : null };
+}
+function restoreInputFocus(root, focus) {
+  if (!focus) return;
+  const field = [...root.querySelectorAll("input, select, textarea")].find((candidate) => draftKey(candidate) === focus.key);
+  if (!field) return;
+  field.focus({ preventScroll: true });
+  if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && typeof focus.start === "number" && typeof focus.end === "number") field.setSelectionRange(focus.start, focus.end);
 }
 app.addEventListener("input", saveDraft);
 app.addEventListener("change", saveDraft);
@@ -103,6 +121,7 @@ async function login(payload) { const result = await api.staffLogin(payload); co
 async function loginAdmin(adminPin) { const result = await api.adminLogin(adminPin); context.adminSession = result.adminSession; sessionStorage.setItem(ADMIN_KEY, result.adminSession); history.pushState({}, "", "/admin"); await refresh(); }
 function render() {
   if (!context.state) { app.innerHTML = `<main class="loading-screen"><p>${context.error || "正在加载 Agentic Football 现场运营台…"}</p></main>`; return; }
+  const focus = captureInputFocus();
   const surface = document.createElement("main"); surface.className = "app-surface"; app.replaceChildren(surface);
   const rerender = async () => refresh();
   const logout = () => { sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = ""; history.pushState({}, "", "/"); refresh(); };
@@ -111,6 +130,7 @@ function render() {
   else renderParticipant(surface, context.state, api, rerender);
   if (context.feedbackOpen) surface.insertAdjacentHTML("beforeend", feedbackModal());
   restoreDrafts(surface);
+  restoreInputFocus(surface, focus);
 }
 function feedbackModal() { return `<div class="modal-backdrop feedback-backdrop"><section class="dispatch-modal feedback-modal" role="dialog" aria-modal="true" aria-label="提交反馈"><div class="modal-header"><div><h2>反馈</h2></div><button type="button" class="text-button" data-feedback-close>关闭</button></div><form id="feedback-form" class="stack"><label>你的反馈<textarea name="note" rows="4" maxlength="800" required placeholder="问题、建议或现场情况"></textarea></label><button>提交反馈</button></form></section></div>`; }
 app.addEventListener("click", (event) => { const button = event.target.closest("button"); if (!button) return; if (button.dataset.feedback !== undefined) { context.feedbackOpen = true; render(); } if (button.dataset.feedbackClose !== undefined) { context.feedbackOpen = false; render(); } });

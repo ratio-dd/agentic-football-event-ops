@@ -33,7 +33,7 @@ const server = createServer(async (incoming, outgoing) => {
         "cache-control": "no-store",
         "content-type": "application/json; charset=utf-8",
       });
-      outgoing.end(JSON.stringify({ status: "ok", database: "ok" }));
+      outgoing.end(JSON.stringify({ status: "ok", database: "ok", acceptanceRunId: process.env.ACCEPTANCE_RUN_ID || null }));
       return;
     }
 
