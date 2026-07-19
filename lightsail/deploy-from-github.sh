@@ -67,6 +67,9 @@ for attempt in $(seq 1 12); do
 done
 
 [ "$(sudo docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$APP_CONTAINER")" = "healthy" ]
-curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --insecure https://127.0.0.1/healthz
+# The app is intentionally private to the Docker network. Do not probe Caddy
+# through 127.0.0.1 over HTTPS: the public certificate is bound to the AFC
+# hostname and the loopback request has no matching SNI/Host header.
+sudo docker exec "$APP_CONTAINER" node -e "fetch('http://127.0.0.1:8787/healthz').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 sudo docker tag "$candidate_image" agentic-football-event-ops:feedback
 echo "Deployment completed: $candidate_image"

@@ -94,4 +94,4 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "ubuntu@$DEPLOY_HOST"
           curl --fail --silent --show-error --connect-timeout 8 --max-time 15 \
-            "https://$DEPLOY_HOST/healthz"
+            "https://afc.awscommunity.cn/healthz"
