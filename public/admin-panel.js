@@ -26,6 +26,7 @@ export function renderAdmin(root, state, api, controls) {
     if (button.dataset.action === "revoke-qualification" && window.confirm("确认撤销该队参赛资格吗？")) { const note = window.prompt("撤销原因（可留空）", ""); if (note !== null) return action(() => api.revokeQualification(button.dataset.teamId, note), "已撤销参赛资格。", button); }
     if (button.dataset.action === "unfreeze" && window.confirm("确认解除比赛名单冻结吗？")) return action(() => api.unfreezeCompetition(), "比赛名单已解除冻结。", button);
     if (button.dataset.action === "void-tournament" && window.confirm("确认作废当前赛程并重新开始分组吗？")) { const reason = window.prompt("作废原因（可留空）", ""); if (reason !== null) return action(() => api.voidTournament(reason), "赛程已作废。", button); }
+    if (button.dataset.action === "rebuild-knockout" && window.confirm("确认保留当前轮次赛果，并重新生成后续淘汰赛吗？")) return action(() => api.rebuildKnockout(), "后续淘汰赛已按当前胜者重建。", button);
     if (button.dataset.action === "group-reset") { resetGroupDraft(ui, state.tournament); return renderAdmin(root, state, api, controls); }
     if (button.dataset.groupTeam) { ui.groupSelectedTeamId = ui.groupSelectedTeamId === button.dataset.groupTeam ? "" : button.dataset.groupTeam; ui.groupBoardError = ""; return renderAdmin(root, state, api, controls); }
     if (button.dataset.groupMoveTarget) {
@@ -88,7 +89,9 @@ function competitionPanel(state, ui) {
   }
   const canEditGroups = tournament.status === "group" && !tournament.matches.some((match) => match.status === "completed");
   const board = canEditGroups ? groupBoard(tournament, ui) : "";
-  return `<section class="admin-section">${progress}<div><h2>${tournament.status === "knockout" ? "淘汰赛已生成" : "小组赛"}</h2><p>${canEditGroups ? "确认分组后，保存并开始由 Staff 录入赛果。" : "Staff 录入赛果；这里可生成淘汰赛或作废赛程。"}</p></div><div class="admin-competition-links"><a href="/staff">打开 Staff 赛果录入</a><a href="/display" target="_blank" rel="noreferrer">打开现场大屏</a></div>${board}${tournament.status === "group" && !tournament.knockoutMatches?.length ? `<form id="admin-generate-knockout" class="admin-form"><button ${tournament.matches.some((match) => match.status !== "completed") ? "disabled" : ""}>生成淘汰赛</button></form>` : ""}<button data-action="void-tournament" class="secondary">作废并重新分组</button>${qualificationExceptions(eligible)}</section>`;
+  const hasBrokenFutureRound = tournament.status === "knockout" && tournament.knockoutMatches?.some((match) => match.round > 1 && match.status === "bye" && match.teamAId && match.teamBId);
+  const repair = hasBrokenFutureRound ? `<section class="admin-subsection"><h3>修复下一轮</h3><p>保留已完成的当前轮次赛果，按胜者重新生成后续淘汰赛。</p><button type="button" data-action="rebuild-knockout">重新生成下一轮</button></section>` : "";
+  return `<section class="admin-section">${progress}<div><h2>${tournament.status === "knockout" ? "淘汰赛已生成" : "小组赛"}</h2><p>${canEditGroups ? "确认分组后，保存并开始由 Staff 录入赛果。" : "Staff 录入赛果；这里可生成淘汰赛或作废赛程。"}</p></div><div class="admin-competition-links"><a href="/staff">打开 Staff 赛果录入</a><a href="/display" target="_blank" rel="noreferrer">打开现场大屏</a></div>${board}${repair}${tournament.status === "group" && !tournament.knockoutMatches?.length ? `<form id="admin-generate-knockout" class="admin-form"><button ${tournament.matches.some((match) => match.status !== "completed") ? "disabled" : ""}>生成淘汰赛</button></form>` : ""}<button data-action="void-tournament" class="secondary">作废并重新分组</button>${qualificationExceptions(eligible)}</section>`;
 }
 
 function cloneGroups(groups) { return groups.map((group) => ({ id: group.id, teamIds: [...group.teamIds] })); }

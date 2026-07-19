@@ -109,6 +109,7 @@ const api = {
   updateTournamentGroups: (groups) => request("/api/ops/competition/groups", { method: "PUT", body: { groups }, staff: true }),
   swapTournamentTeams: (firstTeamId, secondTeamId) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true }),
   generateKnockout: () => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true }),
+  rebuildKnockout: () => request("/api/ops/competition/knockout/rebuild", { method: "POST", body: {}, staff: true }),
   voidTournament: (reason) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true }),
   result: (matchId, scoreA, scoreB) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true }),
 };

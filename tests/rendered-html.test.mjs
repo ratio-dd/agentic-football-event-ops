@@ -110,6 +110,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(await read("public/admin-panel.js"), /请从 Staff 工作台进入/);
   assert.match(await read("public/admin-panel.js"), /只读核对当前资源/);
   assert.match(await read("public/admin-panel.js"), /拖到满组的一支队伍卡可交换/);
+  assert.match(await read("public/admin-panel.js"), /重新生成下一轮/);
   assert.match(await read("worker/index.ts"), /\/api\/admin\/diagnostics/);
   assert.match(await read("worker/index.ts"), /\/api\/maintenance\/snapshot/);
   assert.match(css, /group-board-lane/);
@@ -406,4 +407,31 @@ test("round-robin scheduling gives every team at most one group match per round"
   const rejected = await call(worker, db, "/api/ops/competition/groups", { method: "PUT", staff, admin, body: { groups: invalidGroups } });
   assert.equal(rejected.response.status, 409);
   assert.match(rejected.data.error, /1–4/);
+});
+
+test("knockout waits for both winners and can rebuild a corrupted future round", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "淘汰赛修复 TA" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(Array.from({ length: 8 }, (_, index) => `KO-${index + 1}`)) });
+  const teams = [];
+  for (let index = 1; index <= 8; index += 1) {
+    const person = await call(worker, db, "/api/participants", { method: "POST", client: `knockout-${index}`, body: { nickname: `淘汰修复${index}`, supportProfile: {} } });
+    const team = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } }); teams.push(team.data.team);
+    await call(worker, db, `/api/ops/teams/${team.data.team.id}/issue-code`, { method: "POST", staff, body: {} }); await call(worker, db, `/api/ops/qualification/teams/${team.data.team.id}/confirm`, { method: "POST", staff, body: {} });
+  }
+  await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((team) => team.id) } });
+  const grouped = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 2, qualifiersPerGroup: 4 } });
+  for (const match of grouped.data.tournament.matches) await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: 1, scoreB: 0 } });
+  const knockout = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, admin, body: {} });
+  const firstRound = knockout.data.tournament.knockoutMatches.filter((match) => match.round === 1);
+  await call(worker, db, `/api/ops/matches/${firstRound[0].id}/result`, { method: "POST", staff, body: { scoreA: 2, scoreB: 0 } });
+  const oneWinner = await call(worker, db, "/api/ops/state", { staff });
+  assert.equal(oneWinner.data.tournament.knockoutMatches.filter((match) => match.round === 2).every((match) => match.status === "pending"), true);
+  for (const match of firstRound.slice(1)) await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: 2, scoreB: 0 } });
+  const completedRound = await call(worker, db, "/api/ops/state", { staff });
+  assert.equal(completedRound.data.tournament.knockoutMatches.filter((match) => match.round === 2).every((match) => match.status === "ready"), true);
+  const raw = JSON.parse(db.row.data); const broken = raw.tournament.knockoutMatches.find((match) => match.round === 2); broken.status = "bye"; broken.winnerId = broken.teamAId; db.row.data = JSON.stringify(raw);
+  const repaired = await call(worker, db, "/api/ops/competition/knockout/rebuild", { method: "POST", staff, admin, body: {} });
+  assert.equal(repaired.response.status, 200); assert.equal(repaired.data.tournament.knockoutMatches.filter((match) => match.round === 1 && match.status === "completed").length, firstRound.length);
+  assert.equal(repaired.data.tournament.knockoutMatches.filter((match) => match.round === 2).every((match) => match.status === "ready"), true);
 });

@@ -70,6 +70,7 @@ const worker = {
       if (pathname === "/api/ops/competition/groups" && request.method === "PUT") return admin ? mutation(env, request, (s) => updateTournamentGroups(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/swap" && request.method === "POST") return admin ? mutation(env, request, (s) => swapTournamentTeams(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/knockout" && request.method === "POST") return admin ? mutation(env, request, (s) => generateKnockout(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
+      if (pathname === "/api/ops/competition/knockout/rebuild" && request.method === "POST") return admin ? mutation(env, request, (s) => rebuildKnockout(s, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/void" && request.method === "POST") return admin ? mutation(env, request, (s) => voidTournament(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (/^\/api\/ops\/matches\/[^/]+\/result$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => recordResult(s, matchId(pathname), request, staff));
       return json({ error: "Not found" }, 404);
@@ -627,7 +628,41 @@ function standings(s: State, tournament: any, group: any) {
   rows.forEach((row: any) => { row.goalDifference = row.goalsFor - row.goalsAgainst; });
   return rows.sort((a: any, b: any) => b.points - a.points || b.goalDifference - a.goalDifference || b.goalsFor - a.goalsFor || (team(s, a.teamId)?.teamNumber || "").localeCompare(team(s, b.teamId)?.teamNumber || ""));
 }
-function resolveKnockout(tournament: any) { const matches = tournament.knockoutMatches || []; let changed = true; while (changed) { changed = false; matches.forEach((m: any) => { if (m.sourceAId) { const source = matches.find((candidate: any) => candidate.id === m.sourceAId); if (source?.winnerId && m.teamAId !== source.winnerId) { m.teamAId = source.winnerId; changed = true; } } if (m.sourceBId) { const source = matches.find((candidate: any) => candidate.id === m.sourceBId); if (source?.winnerId && m.teamBId !== source.winnerId) { m.teamBId = source.winnerId; changed = true; } } if (!m.winnerId && (m.teamAId || m.teamBId) && !(m.teamAId && m.teamBId)) { m.winnerId = m.teamAId || m.teamBId; m.status = "bye"; changed = true; } if (!m.winnerId && m.teamAId && m.teamBId && m.status === "pending") { m.status = "ready"; changed = true; } }); }
+function resolveKnockout(tournament: any) {
+  const matches = tournament.knockoutMatches || []; let changed = true;
+  while (changed) {
+    changed = false;
+    matches.forEach((m: any) => {
+      const sourceA = m.sourceAId ? matches.find((candidate: any) => candidate.id === m.sourceAId) : null;
+      const sourceB = m.sourceBId ? matches.find((candidate: any) => candidate.id === m.sourceBId) : null;
+      if (sourceA?.winnerId && m.teamAId !== sourceA.winnerId) { m.teamAId = sourceA.winnerId; changed = true; }
+      if (sourceB?.winnerId && m.teamBId !== sourceB.winnerId) { m.teamBId = sourceB.winnerId; changed = true; }
+      // A downstream match can receive its two winners at different times.
+      // Do not declare a bye until both source matches have resolved.
+      const sourcesResolved = (!m.sourceAId || Boolean(sourceA?.winnerId)) && (!m.sourceBId || Boolean(sourceB?.winnerId));
+      if (!sourcesResolved || m.winnerId) return;
+      if (m.teamAId && m.teamBId && m.status === "pending") { m.status = "ready"; changed = true; }
+      if ((m.teamAId || m.teamBId) && !(m.teamAId && m.teamBId)) { m.winnerId = m.teamAId || m.teamBId; m.status = "bye"; changed = true; }
+    });
+  }
+}
+function nextKnockoutRounds(previous: any[]) {
+  const matches: any[] = []; let sourceRound = previous; let round = Math.max(...previous.map((match: any) => match.round)) + 1;
+  while (sourceRound.length > 1) {
+    const next: any[] = [];
+    for (let index = 0; index < sourceRound.length; index += 2) next.push({ id: id(), stage: "knockout", round, teamAId: null, teamBId: null, sourceAId: sourceRound[index].id, sourceBId: sourceRound[index + 1].id, status: "pending", scoreA: null, scoreB: null, winnerId: null });
+    matches.push(...next); sourceRound = next; round += 1;
+  }
+  return matches;
+}
+function rebuildKnockout(s: State, actor: Staff) {
+  const tournament = s.tournament; if (!tournament || tournament.status !== "knockout") return fail("当前没有可重建的淘汰赛", 409);
+  const roundOne = (tournament.knockoutMatches || []).filter((match: any) => match.round === 1);
+  if (roundOne.length < 2 || roundOne.some((match: any) => !match.winnerId)) return fail("请先完成全部当前轮次的赛果", 409);
+  if ((tournament.knockoutMatches || []).some((match: any) => match.round > 1 && match.status === "completed")) return fail("后续轮次已有赛果，不能自动重建", 409);
+  tournament.knockoutMatches = [...roundOne, ...nextKnockoutRounds(roundOne)]; resolveKnockout(tournament);
+  audit(s, actor, "tournament.knockout.rebuilt", "tournament", tournament.id, `from ${roundOne.length} winners`);
+  return { tournament: publicTournament(s) };
 }
 async function generateKnockout(s: State, request: Request, actor: Staff) { const tournament = s.tournament; if (!tournament || tournament.status !== "group") return fail("请先生成并完成小组赛", 409); if (tournament.matches.some((m: any) => m.status !== "completed")) return fail("请先录入全部小组赛结果", 409); if (tournament.knockoutMatches?.length) return fail("淘汰赛已生成", 409); const qualified = tournament.groups.flatMap((group: any) => standings(s, tournament, group).slice(0, tournament.qualifiersPerGroup).map((row: any) => row.teamId)); if (qualified.length < 2) return fail("晋级队伍不足", 409); let bracketSize = 1; while (bracketSize < qualified.length) bracketSize *= 2; const seeds = [...qualified, ...Array(Math.max(0, bracketSize - qualified.length)).fill(null)]; const matches: any[] = []; let previous: any[] = []; for (let index = 0; index < bracketSize / 2; index += 1) previous.push({ id: id(), stage: "knockout", round: 1, teamAId: seeds[index], teamBId: seeds[bracketSize - 1 - index], sourceAId: null, sourceBId: null, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...previous); let round = 2; while (previous.length > 1) { const next: any[] = []; for (let index = 0; index < previous.length; index += 2) next.push({ id: id(), stage: "knockout", round, teamAId: null, teamBId: null, sourceAId: previous[index].id, sourceBId: previous[index + 1].id, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...next); previous = next; round += 1; } tournament.knockoutMatches = matches; tournament.status = "knockout"; resolveKnockout(tournament); audit(s, actor, "tournament.knockout.generated", "tournament", tournament.id, `${qualified.length} teams`); return { tournament: publicTournament(s) }; }
 async function voidTournament(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (!s.tournament) return fail("当前没有赛程", 409); const tournamentId = s.tournament.id; s.tournament = null; s.competition = { frozenTeamIds: [], frozenTeams: [], frozenAt: null, frozenBy: null }; audit(s, actor, "tournament.voided", "tournament", tournamentId, text((await body(request)).reason, 120)); return { voidedTournamentId: tournamentId }; }
