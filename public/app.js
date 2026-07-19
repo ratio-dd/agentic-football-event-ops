@@ -21,7 +21,7 @@ const context = {
   formDraft: new Map(),
   feedbackOpen: false,
   staffUi: { tab: "overview", groupQuery: "", searchResults: [], selectedMemberIds: [], auditFilter: "all" },
-  adminUi: { section: "activity" },
+  adminUi: { section: "activity", groupDraft: null, groupDraftTournamentId: "", groupSelectedTeamId: "", groupDragTeamId: "", groupBoardError: "" },
 };
 localStorage.setItem(CLIENT_KEY, context.clientId);
 
@@ -95,6 +95,7 @@ const api = {
   updateEventGates: (gates) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true }),
   importResourceCodes: ({ workshopCodes, gamePortalCodes }) => request("/api/ops/codes/import", { method: "POST", body: { workshopCodes, gamePortalCodes }, staff: true }),
   backfillGamePortalCodes: () => request("/api/admin/codes/game-portal/backfill", { method: "POST", body: {}, staff: true }),
+  diagnostics: () => request("/api/admin/diagnostics", { staff: true }),
   setEventLinks: (workshopUrl, gamePortalUrl) => request("/api/ops/event-links", { method: "PUT", body: { workshopUrl, gamePortalUrl }, staff: true }),
   reclaimCode: (teamId) => request(`/api/admin/teams/${teamId}/reclaim-code`, { method: "POST", body: {}, staff: true }),
   issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
@@ -105,6 +106,7 @@ const api = {
   freezeCompetition: (teamIds) => request("/api/ops/competition/freeze", { method: "POST", body: { teamIds }, staff: true }),
   unfreezeCompetition: () => request("/api/ops/competition/unfreeze", { method: "POST", body: {}, staff: true }),
   tournament: (groupCount, qualifiersPerGroup) => request("/api/ops/competition/generate", { method: "POST", body: { groupCount, qualifiersPerGroup }, staff: true }),
+  updateTournamentGroups: (groups) => request("/api/ops/competition/groups", { method: "PUT", body: { groups }, staff: true }),
   swapTournamentTeams: (firstTeamId, secondTeamId) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true }),
   generateKnockout: () => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true }),
   voidTournament: (reason) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true }),

@@ -6,6 +6,10 @@ type State = Record<string, any>;
 type Staff = { id: string; nickname: string };
 
 const EVENT_ID = "beijing-meetup-2026";
+// The formal afternoon format is 8 groups of four when 32 teams qualify.
+// Smaller events may use fewer groups, but no group may exceed four teams so
+// every team in a completed 32-team group stage plays the same three rounds.
+const MAX_TEAMS_PER_GROUP = 4;
 const schema = "CREATE TABLE IF NOT EXISTS event_state (id TEXT PRIMARY KEY, data TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)";
 
 const worker = {
@@ -20,6 +24,9 @@ const worker = {
       await env.DB.prepare(schema).run();
       const { pathname } = url;
       if (pathname === "/api/state" && request.method === "GET") return json(await publicView(env, request));
+      // This is intentionally temporary for live-event verification. It is
+      // read-only and can be closed immediately by an Admin from 活动设置.
+      if (pathname === "/api/maintenance/snapshot" && request.method === "GET") { const snapshot = await publicMaintenanceSnapshot(env); return json(snapshot, snapshot.status || 200); }
       if (pathname === "/api/participant/qr" && request.method === "GET") return participantQr(env, request, url);
       if (pathname === "/api/display" && request.method === "GET") return json(await displayView(env));
       if (pathname === "/api/participants" && request.method === "POST") return mutation(env, request, (s) => register(s, request));
@@ -35,6 +42,7 @@ const worker = {
       const admin = await adminFor(env, request);
       if (pathname === "/api/ops/state" && request.method === "GET") return json(await staffView(env));
       if (pathname === "/api/admin/state" && request.method === "GET") return admin ? json(await adminView(env)) : json({ error: "需要管理后台权限" }, 403);
+      if (pathname === "/api/admin/diagnostics" && request.method === "GET") return admin ? json(await adminDiagnostics(env)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/event-gates" && request.method === "PUT") return admin ? mutation(env, request, (s) => updateEventGates(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname.startsWith("/api/ops/participants") && request.method === "GET") return json(await participantSearch(env, url.searchParams.get("q") || ""));
       if (pathname === "/api/ops/teams" && request.method === "POST") return mutation(env, request, (s) => makeTeam(s, request, staff));
@@ -59,6 +67,7 @@ const worker = {
       if (pathname === "/api/ops/competition/freeze" && request.method === "POST") return admin ? mutation(env, request, (s) => freezeCompetition(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/unfreeze" && request.method === "POST") return admin ? mutation(env, request, (s) => unfreezeCompetition(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/generate" && request.method === "POST") return admin ? mutation(env, request, (s) => generateTournament(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
+      if (pathname === "/api/ops/competition/groups" && request.method === "PUT") return admin ? mutation(env, request, (s) => updateTournamentGroups(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/swap" && request.method === "POST") return admin ? mutation(env, request, (s) => swapTournamentTeams(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/knockout" && request.method === "POST") return admin ? mutation(env, request, (s) => generateKnockout(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/void" && request.method === "POST") return admin ? mutation(env, request, (s) => voidTournament(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
@@ -87,7 +96,7 @@ async function mutation(env: Env, request: Request, action: (s: State) => any): 
   return json({ error: "现场数据刚刚发生变化，请重试" }, 409);
 }
 
-function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true }; }
+function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true, publicMaintenanceSnapshot: true }; }
 const DEMO_WORKSHOP_URL = "https://example.com/agentic-football-workshop";
 const GAME_PORTAL_URL = "https://agentic-football.aws.dev/";
 function initialState() { return { event: { id: EVENT_ID, name: "Agentic Football 现场运营台", maxWorkshopTeams: 32, workshopUrl: DEMO_WORKSHOP_URL, gamePortalUrl: GAME_PORTAL_URL, gates: defaultGates() }, participants: [], teams: [], allocationRuns: [], manualSplitAudits: [], workshopCodes: [], gamePortalCodes: [], competition: { frozenTeamIds: [], frozenAt: null, frozenBy: null }, staffAccounts: [], staffSessions: [], adminSessions: [], tournament: null, auditLog: [], feedback: [] }; }
@@ -117,6 +126,12 @@ function json(value: unknown, status = 200) { return new Response(JSON.stringify
 async function participantQr(env: Env, request: Request, url: URL) { const { state } = await stateOf(env.DB); const shortId = text(url.searchParams.get("participant"), 20).toUpperCase(); const participant = state.participants.find((p: any) => p.staffShortId === shortId) || state.participants.find((p: any) => p.clientIds.includes(client(request))); if (!participant) return new Response("Not found", { status: 404 }); const svg = await QRCode.toString(participant.staffShortId, { type: "svg", errorCorrectionLevel: "M", margin: 1, color: { dark: "#075b32", light: "#ffffff" } }); return new Response(svg, { headers: { "content-type": "image/svg+xml", "cache-control": "no-store" } }); }
 function audit(s: State, actor: Staff | { id: string; nickname: string }, action: string, objectType: string, objectId: string, reason = "") { s.auditLog.push({ id: id(), staffAccountId: actor.id, staffNickname: actor.nickname, action, objectType, objectId, reason, at: now() }); if (s.auditLog.length > 500) s.auditLog.splice(0, s.auditLog.length - 500); }
 function team(s: State, value: string) { return s.teams.find((t: any) => t.id === value); }
+function frozenCompetitionTeamIds(s: State) { return new Set([...(s.competition?.frozenTeamIds || []), ...(s.tournament?.frozenTeamIds || [])]); }
+function isCompetitionRosterLocked(s: State, value: string) { return frozenCompetitionTeamIds(s).has(value); }
+function preventFrozenRosterMutation(s: State, teamIds: string[]) {
+  const locked = teamIds.find((teamId) => isCompetitionRosterLocked(s, teamId));
+  return locked ? fail("该队已在冻结参赛名单中；请先由 Admin 解除名单冻结或作废赛程", 409) : null;
+}
 function teamByNumber(s: State, value: string) { return s.teams.find((t: any) => t.teamNumber === normaliseTeamNumber(value)); }
 function nextTeamNumber(s: State) { const highest = s.teams.reduce((max: number, t: any) => Math.max(max, Number(String(t.teamNumber || "").replace(/\D/g, "")) || 0), 0); return `T-${String(highest + 1).padStart(3, "0")}`; }
 function normaliseTeamNumber(value: unknown) { const numeric = text(value, 20).toUpperCase().replace(/^T[-\s]?/, "").replace(/^0+/, "") || "0"; return `T-${numeric.padStart(3, "0")}`; }
@@ -206,6 +221,46 @@ function teamView(s: State, t: any, clientId = "") {
 async function publicView(env: Env, request: Request) { const { state } = await stateOf(env.DB); const clientId = client(request); const participant = state.participants.find((p: any) => p.clientIds.includes(clientId)); const currentTeam = participant?.teamId ? teamView(state, team(state, participant.teamId), clientId) : null; return { event: state.event, currentParticipant: participant ? publicParticipant(participant, clientId) : null, currentTeam, tournament: publicTournament(state) }; }
 async function staffView(env: Env) { const { state } = await stateOf(env.DB); const active = state.teams.filter((t: any) => t.status !== "dissolved"); const manualTeams = active.filter((t: any) => t.type === "manual"); const automaticTeams = active.filter((t: any) => t.type === "auto"); const freePeople = state.participants.filter((p: any) => !p.teamId && p.allocationSource !== "waitlist"); const waitlist = state.participants.filter((p: any) => p.allocationSource === "waitlist"); const conflicts = allocationValidation(state).conflicts; return { event: state.event, codeSummary: codeSummary(state), competition: state.competition, participants: state.participants.map((p: any) => ({ ...p, clientIds: undefined, codeVisibleClientIds: undefined })), teams: state.teams.map((t: any) => teamView(state, t)), allocation: { resourceLimit: 32, freePeople: freePeople.map((p: any) => publicParticipant(p, "")), waitlist: waitlist.map((p: any) => ({ ...publicParticipant(p, ""), waitlistReason: p.waitlistReason || "CAPACITY_EXHAUSTED" })), manualTeams: manualTeams.map((t: any) => teamView(state, t)), automaticTeams: automaticTeams.map((t: any) => teamView(state, t)), conflicts, lowAttendanceSuggestions: lowAttendanceSuggestions(state), latestPreview: state.allocationRuns.filter((r: any) => r.status === "preview").at(-1) || null, latestPublished: state.allocationRuns.filter((r: any) => r.status === "published").at(-1) || null, runs: state.allocationRuns.slice(-20).reverse(), manualSplitAudits: state.manualSplitAudits.slice(-50).reverse() }, tournament: publicTournament(state), auditLog: state.auditLog.slice(-100).reverse() }; }
 async function adminView(env: Env) { const staff = await staffView(env); const { state } = await stateOf(env.DB); const reclaimableTeams = state.teams.filter((team: any) => team.status === "dissolved" && teamHasIssuedCodes(team)).map((team: any) => teamView(state, team)); const gamePortalBackfillTeams = gamePortalBackfillTargets(state).map((team: any) => teamView(state, team)); return { ...staff, feedback: state.feedback.slice(-100).reverse(), reclaimableTeams, gamePortalBackfillTeams }; }
+async function adminDiagnostics(env: Env) {
+  const { state, version } = await stateOf(env.DB); const active = state.teams.filter((item: any) => item.status !== "dissolved");
+  const inspect = (kind: "workshop" | "gamePortal", codes: any[], field: "workshopCodeId" | "gamePortalCodeId") => {
+    const byId = new Map(codes.map((code: any) => [code.id, code]));
+    const missing = active.filter((item: any) => !item[field]).map((item: any) => item.teamNumber);
+    const invalidTeamReference = active.filter((item: any) => item[field] && (byId.get(item[field])?.status !== "assigned" || byId.get(item[field])?.teamId !== item.id)).map((item: any) => item.teamNumber);
+    const orphanAssignments = codes.filter((code: any) => code.status === "assigned" && (!team(state, code.teamId || "") || team(state, code.teamId || "")?.status === "dissolved" || team(state, code.teamId || "")?.[field] !== code.id)).length;
+    return { kind, total: codes.length, available: codes.filter((code: any) => code.status === "available").length, assigned: codes.filter((code: any) => code.status === "assigned").length, activeTeamsMissingCode: missing, activeTeamsWithInvalidReference: invalidTeamReference, orphanAssignments };
+  };
+  const workshop = inspect("workshop", state.workshopCodes, "workshopCodeId"); const gamePortal = inspect("gamePortal", state.gamePortalCodes, "gamePortalCodeId");
+  const hasIssues = [...workshop.activeTeamsWithInvalidReference, ...gamePortal.activeTeamsWithInvalidReference].length > 0 || workshop.orphanAssignments > 0 || gamePortal.orphanAssignments > 0;
+  return { version, generatedAt: now(), participants: state.participants.length, activeTeams: active.length, teamStatusCounts: Object.fromEntries(Object.entries(Object.groupBy(active, (item: any) => item.status)).map(([status, teams]) => [status, (teams as any[]).length])), workshop, gamePortal, tournament: state.tournament ? { status: state.tournament.status, groupCount: state.tournament.groups?.length || 0, groupMatchesCompleted: state.tournament.matches?.filter((match: any) => match.status === "completed").length || 0, groupMatchesTotal: state.tournament.matches?.length || 0 } : null, lastAuditAt: state.auditLog.at(-1)?.at || null, integrity: hasIssues ? "attention" : "ok" };
+}
+async function publicMaintenanceSnapshot(env: Env) {
+  const { state, version } = await stateOf(env.DB);
+  if (state.event?.gates?.publicMaintenanceSnapshot === false) return { error: "维护快照已关闭", status: 404 };
+  const activeTeams = state.teams.filter((team: any) => team.status !== "dissolved");
+  const codeRows = (codes: any[]) => codes.map((item: any) => ({
+    code: item.code,
+    status: item.status,
+    teamNumber: item.teamId ? team(state, item.teamId)?.teamNumber || null : null,
+  }));
+  const teamRows = activeTeams.map((item: any) => ({
+    teamNumber: item.teamNumber,
+    status: item.status,
+    memberCount: item.memberIds.length,
+    workshopCode: item.workshopCodeId ? state.workshopCodes.find((code: any) => code.id === item.workshopCodeId)?.code || null : null,
+    gamePortalCode: item.gamePortalCodeId ? state.gamePortalCodes.find((code: any) => code.id === item.gamePortalCodeId)?.code || null : null,
+  }));
+  return {
+    temporary: true,
+    generatedAt: now(),
+    version,
+    teams: teamRows,
+    resources: {
+      workshop: codeRows(state.workshopCodes),
+      gamePortal: codeRows(state.gamePortalCodes),
+    },
+  };
+}
 async function displayView(env: Env) { const { state } = await stateOf(env.DB); return { event: state.event, tournament: publicTournament(state) }; }
 async function participantSearch(env: Env, q: string) { const { state } = await stateOf(env.DB); const key = q.trim().toLowerCase(); const numberKey = key.replace(/^p[-\s]?/, "").replace(/^0+/, ""); const participants = state.participants.filter((p: any) => { const number = p.staffShortId.toLowerCase().replace(/^p-?0*/, ""); return !key || p.nickname.toLowerCase().includes(key) || p.staffShortId.toLowerCase().includes(key) || (Boolean(numberKey) && number.includes(numberKey)); }).sort((a: any, b: any) => Number(b.staffShortId.toLowerCase() === key) - Number(a.staffShortId.toLowerCase() === key) || Number(b.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey) - Number(a.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey)).slice(0, 8).map((p: any) => ({ id: p.id, nickname: p.nickname, staffShortId: p.staffShortId, teamId: p.teamId, supportProfile: p.supportProfile })); return { participants }; }
 function publicTournament(s: State) {
@@ -248,6 +303,7 @@ async function makeTeam(s: State, request: Request, actor: Staff) {
   const b = await body(request); const memberIds = ids(b.memberIds); if (memberIds.length < 1 || memberIds.length > 3) return fail("每队必须为 1–3 人");
   const members = memberIds.map((memberId) => s.participants.find((p: any) => p.id === memberId)); if (members.some((p) => !p)) return fail("成员不存在", 404);
   const sourceTeams = [...new Set(members.map((p: any) => p.teamId).filter(Boolean))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  const frozen = preventFrozenRosterMutation(s, sourceTeams.map((source: any) => source.id)); if (frozen) return frozen;
   if (sourceTeams.some((source: any) => teamHasIssuedCodes(source))) return fail("已领取资源的队伍请通过调度面板处理成员变更", 409);
   const retained = sourceTeams.find((source: any) => source.status !== "dissolved" && source.status === "draft") || null;
   const t = retained || teamRecord(s, []);
@@ -293,6 +349,7 @@ function dispatchAssignment(s: State, b: any, actor: Staff) {
   if (finalTargetIds.length > 3) return fail(`目标队伍容量不足：当前操作后将有 ${finalTargetIds.length} 人，最多 3 人`, 409);
 
   const sourceTeams = [...new Set(people.map((p: any) => p.teamId).filter((teamId: string | null) => teamId && teamId !== target?.id))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  const frozen = preventFrozenRosterMutation(s, [...sourceTeams.map((source: any) => source.id), ...(target ? [target.id] : [])]); if (frozen) return frozen;
   const actions = b.dissolutionActions && typeof b.dissolutionActions === "object" ? b.dissolutionActions : {};
   const emptySources = sourceTeams.filter((source: any) => source.memberIds.every((memberId: string) => selectedIds.has(memberId)));
   for (const source of emptySources) {
@@ -319,6 +376,7 @@ async function updateTeam(s: State, value: string, request: Request, actor: Staf
   if (members.some((p: any) => !p)) return fail("成员不存在", 404);
   const selectedIds = new Set(memberIds);
   const sourceTeams = [...new Set(members.map((p: any) => p.teamId).filter((teamId: string | null) => teamId && teamId !== t.id))].map((sourceId) => team(s, sourceId)).filter(Boolean);
+  const frozen = preventFrozenRosterMutation(s, [t.id, ...sourceTeams.map((source: any) => source.id)]); if (frozen) return frozen;
   if (sourceTeams.some((source: any) => teamHasIssuedCodes(source))) return fail("已领取资源的队伍请通过调度面板处理成员变更", 409);
   s.participants.filter((p: any) => p.teamId === t.id && !selectedIds.has(p.id)).forEach((p: any) => { p.teamId = null; p.allocationSource = "free"; });
   sourceTeams.forEach((source: any) => { source.memberIds = source.memberIds.filter((memberId: string) => !selectedIds.has(memberId)); if (source.type === "manual") { source.coreMemberIds = source.coreMemberIds.filter((memberId: string) => !selectedIds.has(memberId)); source.allocatedMemberIds = source.allocatedMemberIds.filter((memberId: string) => !selectedIds.has(memberId)); } });
@@ -399,6 +457,7 @@ function publishAllocation(s: State, value: string, actor: Staff) {
 async function splitManualTeam(s: State, value: string, request: Request, actor: Staff) {
   const source = team(s, value); const b = await body(request); const note = text(b.confirmationNote, 300); const groups = Array.isArray(b.groups) ? b.groups.map(ids).filter((group: string[]) => group.length) : [];
   if (!source || source.type !== "manual" || source.status === "dissolved") return fail("只能拆分有效人工队", 409);
+  const frozen = preventFrozenRosterMutation(s, [source.id]); if (frozen) return frozen;
   if (!note) return fail("人工拆队必须填写成员确认备注", 400);
   const original = ids(source.coreMemberIds); if (!groups.length || groups.some((group: string[]) => group.length > 3) || ids(groups.flat()).length !== original.length || original.some((personId: string) => !ids(groups.flat()).includes(personId))) return fail("拆分结果必须完整覆盖原人工核心成员，每队 1–3 人", 409);
   // System additions are not artificial manual core: when a staff-confirmed
@@ -412,13 +471,14 @@ async function splitManualTeam(s: State, value: string, request: Request, actor:
 async function releaseManualMembers(s: State, value: string, request: Request, actor: Staff) {
   const source = team(s, value); const b = await body(request); const memberIds = ids(b.memberIds); const note = text(b.confirmationNote, 300);
   if (!source || source.type !== "manual" || source.status === "dissolved") return fail("只能从有效人工队释放成员", 409);
+  const frozen = preventFrozenRosterMutation(s, [source.id]); if (frozen) return frozen;
   if (!note) return fail("释放人工核心成员必须填写成员确认备注", 400);
   if (!memberIds.length || memberIds.some((personId) => !source.coreMemberIds.includes(personId)) || source.coreMemberIds.length - memberIds.length < 1) return fail("只能释放部分人工核心成员，且原队至少保留 1 人", 409);
   source.coreMemberIds = source.coreMemberIds.filter((personId: string) => !memberIds.includes(personId)); source.memberIds = source.memberIds.filter((personId: string) => !memberIds.includes(personId));
   memberIds.forEach((personId) => { const p = s.participants.find((candidate: any) => candidate.id === personId); if (p) { p.teamId = null; p.allocationSource = "free"; } });
   const entry = { id: id(), originalTeamId: source.id, originalTeamNumber: source.teamNumber, releasedMemberIds: memberIds, resultTeamIds: [source.id], confirmationNote: note, staffAccountId: actor.id, staffNickname: actor.nickname, at: now() }; s.manualSplitAudits.push(entry); audit(s, actor, "manual_team.members.released", "team", source.id, note); return { audit: entry, team: source };
 }
-function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404); if (teamHasIssuedCodes(t)) return fail("已关联 Code 的队伍需要在解散弹窗中选择保留或回收", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; p.allocationSource = "free"; }); t.memberIds = []; t.coreMemberIds = []; t.allocatedMemberIds = []; dissolveTeam(s, t, "dissolve", actor); return { removedTeamId: t.id }; }
+function removeTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404); const frozen = preventFrozenRosterMutation(s, [t.id]); if (frozen) return frozen; if (teamHasIssuedCodes(t)) return fail("已关联 Code 的队伍需要在解散弹窗中选择保留或回收", 409); s.participants.filter((p: any) => p.teamId === t.id).forEach((p: any) => { p.teamId = null; p.allocationSource = "free"; }); t.memberIds = []; t.coreMemberIds = []; t.allocatedMemberIds = []; dissolveTeam(s, t, "dissolve", actor); return { removedTeamId: t.id }; }
 function confirmTeam(s: State, value: string, actor: Staff) { const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (teamHasIssuedCodes(t)) return { team: t }; t.status = "ready_code"; audit(s, actor, "team.confirmed", "team", t.id); return { team: t }; }
 async function updateTeamStatus(s: State, value: string, request: Request, actor: Staff) {
   const t = team(s, value); if (!t || t.status === "dissolved") return fail("队伍不存在或已解散", 404);
@@ -506,16 +566,39 @@ async function updateEventGates(s: State, request: Request, actor: Staff) {
 }
 function competitionTeams(s: State) { return s.teams.filter((t: any) => t.qualificationStatus === "ta_qualified"); }
 async function revokeQualification(s: State, value: string, request: Request, actor: Staff) { if (!s.event.gates.qualification) return fail("参赛资格确认已关闭", 409); const t = team(s, value); if (!t || t.qualificationStatus !== "ta_qualified") return fail("该队当前不在参赛名单中", 409); if (s.tournament) return fail("赛程已生成，请先作废赛程后再撤销资格", 409); t.qualificationStatus = "not_qualified"; t.status = "issued"; t.qualificationNote = text((await body(request)).note, 120); s.competition.frozenTeamIds = s.competition.frozenTeamIds.filter((teamId: string) => teamId !== t.id); audit(s, actor, "team.ta.qualification.revoked", "team", t.id, t.qualificationNote); return { team: t }; }
-async function freezeCompetition(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (s.tournament) return fail("赛程已生成，不能再修改参赛名单", 409); const b = await body(request); const eligible = competitionTeams(s); const wanted = ids(b.teamIds); const teamIds = wanted.length ? wanted : eligible.map((t: any) => t.id); if (teamIds.length < 2 || teamIds.some((teamId) => !eligible.some((t: any) => t.id === teamId))) return fail("请至少冻结两支已获资格的队伍", 409); s.competition = { frozenTeamIds: teamIds, frozenAt: now(), frozenBy: actor.id }; audit(s, actor, "competition.roster.frozen", "competition", EVENT_ID, `${teamIds.length} teams`); return { competition: s.competition }; }
-async function unfreezeCompetition(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (s.tournament) return fail("赛程已生成，不能解除冻结", 409); s.competition = { frozenTeamIds: [], frozenAt: null, frozenBy: null }; audit(s, actor, "competition.roster.unfrozen", "competition", EVENT_ID); return { competition: s.competition }; }
+async function freezeCompetition(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (s.tournament) return fail("赛程已生成，不能再修改参赛名单", 409); const b = await body(request); const eligible = competitionTeams(s); const wanted = ids(b.teamIds); const teamIds = wanted.length ? wanted : eligible.map((t: any) => t.id); if (teamIds.length < 2 || teamIds.some((teamId) => !eligible.some((t: any) => t.id === teamId))) return fail("请至少冻结两支已获资格的队伍", 409); s.competition = { frozenTeamIds: teamIds, frozenTeams: teamIds.map((teamId) => ({ teamId, memberIds: [...(team(s, teamId)?.memberIds || [])] })), frozenAt: now(), frozenBy: actor.id }; audit(s, actor, "competition.roster.frozen", "competition", EVENT_ID, `${teamIds.length} teams`); return { competition: s.competition }; }
+async function unfreezeCompetition(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (s.tournament) return fail("赛程已生成，不能解除冻结", 409); s.competition = { frozenTeamIds: [], frozenTeams: [], frozenAt: null, frozenBy: null }; audit(s, actor, "competition.roster.unfrozen", "competition", EVENT_ID); return { competition: s.competition }; }
 async function generateTournament(s: State, request: Request, actor: Staff) {
   if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (s.tournament) return fail("已有赛程，请先作废后重建", 409);
-  const b = await body(request); const teams = s.competition.frozenTeamIds.map((teamId: string) => team(s, teamId)).filter((t: any) => t?.qualificationStatus === "ta_qualified");
-  if (teams.length < 2) return fail("请先冻结至少两支已确认队伍", 409); const groupCount = Math.max(1, Math.min(8, Number(b.groupCount) || Math.ceil(teams.length / 4))); const qualifiersPerGroup = Math.max(1, Math.min(2, Number(b.qualifiersPerGroup) || 2));
+  const b = await body(request); const frozenIds = ids(s.competition.frozenTeamIds); const teams = frozenIds.map((teamId: string) => team(s, teamId)).filter((t: any) => t?.qualificationStatus === "ta_qualified");
+  if (teams.length !== frozenIds.length || teams.length < 2) return fail("冻结名单已变化，请先解除名单冻结后重新确认", 409);
+  const frozenSnapshots = Array.isArray(s.competition.frozenTeams) ? s.competition.frozenTeams : [];
+  if (frozenSnapshots.length && frozenSnapshots.some((snapshot: any) => ids(snapshot.memberIds).join(",") !== ids(team(s, snapshot.teamId)?.memberIds).join(","))) return fail("冻结名单中的队伍成员已变化，请先解除名单冻结后重新确认", 409);
+  const requestedGroupCount = Number(b.groupCount); const defaultGroupCount = Math.min(8, Math.ceil(teams.length / 4)); const groupCount = Math.max(1, Math.min(8, Number.isInteger(requestedGroupCount) && requestedGroupCount > 0 ? requestedGroupCount : defaultGroupCount)); const qualifiersPerGroup = Math.max(1, Math.min(2, Number(b.qualifiersPerGroup) || 2));
+  const minimumGroupCount = Math.ceil(teams.length / MAX_TEAMS_PER_GROUP);
+  if (groupCount < minimumGroupCount) return fail(`${teams.length} 支队伍至少需要 ${minimumGroupCount} 个小组；每组最多 ${MAX_TEAMS_PER_GROUP} 队`, 409);
   if (groupCount > teams.length) return fail("小组数不能超过参赛队数"); const groups = Array.from({ length: groupCount }, (_, index) => ({ id: String.fromCharCode(65 + index), teamIds: [] as string[] }));
   teams.forEach((t: any, index: number) => { groups[index % groupCount].teamIds.push(t.id); });
   const matches = groupFixtures(groups);
   s.tournament = { id: id(), status: "group", frozenTeamIds: teams.map((t: any) => t.id), groups, matches, groupCount, qualifiersPerGroup, knockoutMatches: [], createdAt: now() }; audit(s, actor, "tournament.generated", "tournament", s.tournament.id); return { tournament: publicTournament(s) };
+}
+function validateTournamentGroups(tournament: any, rawGroups: unknown) {
+  if (!Array.isArray(rawGroups) || rawGroups.length !== tournament.groups.length) return fail("分组数量不正确", 409);
+  const expectedGroupIds = tournament.groups.map((group: any) => group.id).sort();
+  const groups = rawGroups.map((group: any) => ({ id: text(group?.id, 20), teamIds: ids(group?.teamIds) }));
+  if (groups.some((group: any) => !group.id || group.teamIds.length < 1 || group.teamIds.length > MAX_TEAMS_PER_GROUP)) return fail(`每个小组必须有 1–${MAX_TEAMS_PER_GROUP} 支队伍`, 409);
+  if (groups.map((group: any) => group.id).sort().join(",") !== expectedGroupIds.join(",")) return fail("小组标识不正确", 409);
+  const actualTeamIds = groups.flatMap((group: any) => group.teamIds);
+  if (actualTeamIds.length !== new Set(actualTeamIds).size || actualTeamIds.length !== tournament.frozenTeamIds.length || [...actualTeamIds].sort().join(",") !== [...tournament.frozenTeamIds].sort().join(",")) return fail("每支冻结队伍必须恰好分到一个小组", 409);
+  return { groups: groups.sort((first: any, second: any) => first.id.localeCompare(second.id)) };
+}
+async function updateTournamentGroups(s: State, request: Request, actor: Staff) {
+  if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409);
+  const tournament = s.tournament; if (!tournament || tournament.status !== "group" || tournament.matches.some((match: any) => match.status === "completed")) return fail("已有赛果，不能再调整分组", 409);
+  const validated = validateTournamentGroups(tournament, (await body(request)).groups); if (validated.error) return validated;
+  tournament.groups = validated.groups; tournament.matches = groupFixtures(tournament.groups);
+  audit(s, actor, "tournament.groups.updated", "tournament", tournament.id, tournament.groups.map((group: any) => `${group.id}:${group.teamIds.length}`).join(" "));
+  return { tournament: publicTournament(s) };
 }
 async function swapTournamentTeams(s: State, request: Request, actor: Staff) {
   if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409);
@@ -547,7 +630,7 @@ function standings(s: State, tournament: any, group: any) {
 function resolveKnockout(tournament: any) { const matches = tournament.knockoutMatches || []; let changed = true; while (changed) { changed = false; matches.forEach((m: any) => { if (m.sourceAId) { const source = matches.find((candidate: any) => candidate.id === m.sourceAId); if (source?.winnerId && m.teamAId !== source.winnerId) { m.teamAId = source.winnerId; changed = true; } } if (m.sourceBId) { const source = matches.find((candidate: any) => candidate.id === m.sourceBId); if (source?.winnerId && m.teamBId !== source.winnerId) { m.teamBId = source.winnerId; changed = true; } } if (!m.winnerId && (m.teamAId || m.teamBId) && !(m.teamAId && m.teamBId)) { m.winnerId = m.teamAId || m.teamBId; m.status = "bye"; changed = true; } if (!m.winnerId && m.teamAId && m.teamBId && m.status === "pending") { m.status = "ready"; changed = true; } }); }
 }
 async function generateKnockout(s: State, request: Request, actor: Staff) { const tournament = s.tournament; if (!tournament || tournament.status !== "group") return fail("请先生成并完成小组赛", 409); if (tournament.matches.some((m: any) => m.status !== "completed")) return fail("请先录入全部小组赛结果", 409); if (tournament.knockoutMatches?.length) return fail("淘汰赛已生成", 409); const qualified = tournament.groups.flatMap((group: any) => standings(s, tournament, group).slice(0, tournament.qualifiersPerGroup).map((row: any) => row.teamId)); if (qualified.length < 2) return fail("晋级队伍不足", 409); let bracketSize = 1; while (bracketSize < qualified.length) bracketSize *= 2; const seeds = [...qualified, ...Array(Math.max(0, bracketSize - qualified.length)).fill(null)]; const matches: any[] = []; let previous: any[] = []; for (let index = 0; index < bracketSize / 2; index += 1) previous.push({ id: id(), stage: "knockout", round: 1, teamAId: seeds[index], teamBId: seeds[bracketSize - 1 - index], sourceAId: null, sourceBId: null, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...previous); let round = 2; while (previous.length > 1) { const next: any[] = []; for (let index = 0; index < previous.length; index += 2) next.push({ id: id(), stage: "knockout", round, teamAId: null, teamBId: null, sourceAId: previous[index].id, sourceBId: previous[index + 1].id, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...next); previous = next; round += 1; } tournament.knockoutMatches = matches; tournament.status = "knockout"; resolveKnockout(tournament); audit(s, actor, "tournament.knockout.generated", "tournament", tournament.id, `${qualified.length} teams`); return { tournament: publicTournament(s) }; }
-async function voidTournament(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (!s.tournament) return fail("当前没有赛程", 409); const tournamentId = s.tournament.id; s.tournament = null; s.competition = { frozenTeamIds: [], frozenAt: null, frozenBy: null }; audit(s, actor, "tournament.voided", "tournament", tournamentId, text((await body(request)).reason, 120)); return { voidedTournamentId: tournamentId }; }
+async function voidTournament(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (!s.tournament) return fail("当前没有赛程", 409); const tournamentId = s.tournament.id; s.tournament = null; s.competition = { frozenTeamIds: [], frozenTeams: [], frozenAt: null, frozenBy: null }; audit(s, actor, "tournament.voided", "tournament", tournamentId, text((await body(request)).reason, 120)); return { voidedTournamentId: tournamentId }; }
 async function recordResult(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const tournament = s.tournament; const m = tournament?.matches.find((x: any) => x.id === value) || tournament?.knockoutMatches?.find((x: any) => x.id === value); const a = Number(b.scoreA), z = Number(b.scoreB); if (!m || !Number.isInteger(a) || !Number.isInteger(z) || a < 0 || z < 0 || !m.teamAId || !m.teamBId) return fail("赛果无效", 400); if (m.stage === "group" && tournament?.knockoutMatches?.length) return fail("淘汰赛已生成，小组赛赛果已锁定；如需更正，请先由 Admin 作废赛程并重新生成", 409); if (m.stage === "knockout" && a === z) return fail("淘汰赛必须分出胜负，请重赛后录入", 409); m.scoreA = a; m.scoreB = z; m.status = "completed"; m.winnerId = a > z ? m.teamAId : z > a ? m.teamBId : null; if (m.stage === "knockout") resolveKnockout(tournament); audit(s, actor, "match.result.recorded", "match", m.id, `${a}:${z}`); return { match: m, tournament: publicTournament(s) }; }
 
 function reclaimCode(s: State, value: string, actor: Staff) {

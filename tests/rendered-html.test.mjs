@@ -108,6 +108,11 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(css, /\.bottom-tabs/);
   assert.match(css, /bottom-tabs-four/);
   assert.match(await read("public/admin-panel.js"), /请从 Staff 工作台进入/);
+  assert.match(await read("public/admin-panel.js"), /只读核对当前资源/);
+  assert.match(await read("public/admin-panel.js"), /拖到满组的一支队伍卡可交换/);
+  assert.match(await read("worker/index.ts"), /\/api\/admin\/diagnostics/);
+  assert.match(await read("worker/index.ts"), /\/api\/maintenance\/snapshot/);
+  assert.match(css, /group-board-lane/);
   assert.match(app, /competition\/swap/);
   assert.match(app, /acceptanceClient/);
   assert.match(app, /127\.0\.0\.1/);
@@ -128,6 +133,34 @@ test("shared deployment fails closed without configured Staff and administrator 
   const hiddenEndpoint = await call(worker, db, "/api/teams/self", { method: "POST", client: "gate-phone", body: {} });
   assert.equal(hiddenEndpoint.response.status, 409);
   assert.equal(registered.response.status, 200);
+});
+
+test("admin diagnostics reports resource bindings without exposing code values", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const person = await call(worker, db, "/api/participants", { method: "POST", client: "diagnostic-phone", body: { nickname: "诊断队员", supportProfile: {} } });
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "诊断 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const team = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } });
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(["DIAG-WORKSHOP"]) });
+  const denied = await call(worker, db, "/api/admin/diagnostics", { staff }); assert.equal(denied.response.status, 403);
+  const before = await call(worker, db, "/api/admin/diagnostics", { staff, admin });
+  assert.equal(before.response.status, 200); assert.equal(before.data.activeTeams, 1); assert.deepEqual(before.data.workshop.activeTeamsMissingCode, [team.data.team.teamNumber]); assert.equal(JSON.stringify(before.data).includes("DIAG-WORKSHOP"), false);
+  await call(worker, db, `/api/ops/teams/${team.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const after = await call(worker, db, "/api/admin/diagnostics", { staff, admin });
+  assert.deepEqual(after.data.workshop.activeTeamsMissingCode, []); assert.equal(after.data.workshop.assigned, 1); assert.equal(after.data.integrity, "ok");
+});
+
+test("temporary public maintenance snapshot can be disabled by an administrator", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const person = await call(worker, db, "/api/participants", { method: "POST", client: "public-maintenance-phone", body: { nickname: "快照队员", supportProfile: {} } });
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "快照 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } });
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(["VISIBLE-WORKSHOP"]) });
+  await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const visible = await call(worker, db, "/api/maintenance/snapshot");
+  assert.equal(visible.response.status, 200); assert.equal(visible.data.temporary, true); assert.equal(visible.data.teams[0].workshopCode, "VISIBLE-WORKSHOP");
+  await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { publicMaintenanceSnapshot: false } } });
+  const closed = await call(worker, db, "/api/maintenance/snapshot");
+  assert.equal(closed.response.status, 404);
 });
 
 test("registration enters the free-person pool without creating a draft team", async () => {
@@ -363,4 +396,14 @@ test("round-robin scheduling gives every team at most one group match per round"
       assert.equal(new Set(seen).size, seen.length, `${group.id} 组第 ${round} 轮不应有重复队伍`);
     }
   }
+  const editedGroups = tournament.groups.map((group) => ({ id: group.id, teamIds: [...group.teamIds] }));
+  [editedGroups[0].teamIds[0], editedGroups[1].teamIds[0]] = [editedGroups[1].teamIds[0], editedGroups[0].teamIds[0]];
+  const edited = await call(worker, db, "/api/ops/competition/groups", { method: "PUT", staff, admin, body: { groups: editedGroups } });
+  assert.equal(edited.response.status, 200);
+  assert.equal(edited.data.tournament.groups[0].teamIds[0], editedGroups[0].teamIds[0]);
+  const invalidGroups = editedGroups.map((group) => ({ id: group.id, teamIds: [...group.teamIds] }));
+  invalidGroups[0].teamIds.push(invalidGroups[1].teamIds[0]);
+  const rejected = await call(worker, db, "/api/ops/competition/groups", { method: "PUT", staff, admin, body: { groups: invalidGroups } });
+  assert.equal(rejected.response.status, 409);
+  assert.match(rejected.data.error, /1–4/);
 });

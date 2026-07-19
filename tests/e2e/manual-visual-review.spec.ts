@@ -56,7 +56,7 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await api(request, `/api/ops/teams/${selfTeam.id}/issue-code`, { method: "POST", staff, body: {} });
     await page.goto("/");
     await page.getByRole("button", { name: "我的二维码" }).click();
-    await expect(page.getByText("Team Code", { exact: true })).toBeVisible();
+    await expect(page.getByText("Workshop Code", { exact: true })).toBeVisible();
     await capture(page, testInfo, "04-participant-code-and-qr");
     await api(request, `/api/ops/qualification/teams/${selfTeam.id}/confirm`, { method: "POST", staff, body: {} });
     await page.reload();

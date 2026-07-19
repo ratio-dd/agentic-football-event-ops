@@ -82,8 +82,8 @@ test("Admin 冻结并生成赛程，Staff 录入赛果，参与者看到自己�
   await page.getByRole("button", { name: "冻结名单" }).click();
   await expect(page.getByRole("heading", { name: `已冻结 ${selectedCount} 支队伍` })).toBeVisible();
   await expect(page.locator(".admin-flow-notice")).toContainText("下一步：设置小组数量并生成小组赛");
-  await page.getByRole("button", { name: "生成小组赛" }).click();
-  await expect(page.getByRole("heading", { name: "小组赛已生成" })).toBeVisible();
+  await page.getByRole("button", { name: "生成分组草稿" }).click();
+  await expect(page.getByRole("heading", { name: "小组赛" })).toBeVisible();
   await expect(page.getByRole("link", { name: "打开 Staff 赛果录入" })).toBeVisible();
   await expect(page.getByRole("link", { name: "打开现场大屏" })).toBeVisible();
 
