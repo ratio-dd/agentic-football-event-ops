@@ -159,7 +159,8 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   await call(worker, db, `/api/ops/teams/${secondTeam.data.team.id}/confirm`, { method: "POST", staff, body: {} });
   const issuedSecond = await call(worker, db, `/api/ops/teams/${secondTeam.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issuedSecond.response.status, 200);
-  const gameImported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["PORTAL-001", "PORTAL-002"] } });
+  const gamePortalCodes = Array.from({ length: 34 }, (_, index) => `PORTAL-${String(index + 1).padStart(3, "0")}`);
+  const gameImported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes } });
   assert.equal(gameImported.response.status, 200);
   const portalIssued = await call(worker, db, "/api/admin/codes/game-portal/backfill", { method: "POST", staff, admin, body: {} });
   assert.equal(portalIssued.response.status, 200);
@@ -169,7 +170,7 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   const secondPortalView = await call(worker, db, "/api/state", { client: "pair-code-b" });
   assert.equal(secondPortalView.data.currentTeam.gamePortalCode, "PORTAL-002");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 0, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
+  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 34, available: 32, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
 });
 
 test("staff can group people, issue an official code, and a rebound browser restores it", async () => {

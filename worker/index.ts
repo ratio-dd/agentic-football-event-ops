@@ -425,7 +425,7 @@ async function importCodes(s: State, request: Request, actor: Staff) {
   const workshopCodes = parse(b.workshopCodes ?? b.codes); const gamePortalCodes = parse(b.gamePortalCodes);
   const importingWorkshop = workshopCodes.length > 0; const importingGamePortal = gamePortalCodes.length > 0;
   if (!importingWorkshop && !importingGamePortal) return fail("请至少导入一类 Code");
-  if (workshopCodes.length > s.event.maxWorkshopTeams || gamePortalCodes.length > s.event.maxWorkshopTeams) return fail(`每类最多导入 ${s.event.maxWorkshopTeams} 个 Code`);
+  if (workshopCodes.length > s.event.maxWorkshopTeams) return fail(`Workshop Code 最多导入 ${s.event.maxWorkshopTeams} 个`);
   if (importingWorkshop && s.workshopCodes.some((c: any) => c.status === "assigned")) return fail("已有队伍收到 Workshop Code，不能替换 Workshop Code 列表", 409);
   if (importingGamePortal && s.gamePortalCodes.some((c: any) => c.status === "assigned")) return fail("已有队伍收到 Game Portal Code，不能替换 Game Portal Code 列表", 409);
   const create = (code: string) => ({ id: id(), code, status: "available", teamId: null, assignedAt: null, assignedBy: null });
