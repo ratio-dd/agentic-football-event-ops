@@ -32,7 +32,8 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   const participant = await api(request, "/api/participants", { method: "POST", client, body: { nickname: `资源参赛者${stamp}`, supportProfile: {} } });
   const login = await staffSession(request, `资源 TA ${stamp}`); const admin = await adminSession(request, login.staffSession);
   const team = await api(request, "/api/ops/teams", { method: "POST", staff: login.staffSession, body: { memberIds: [participant.participant.id] } });
-  await api(request, "/api/ops/codes/import", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { codes: Array.from({ length: 5 }, (_, index) => `E2E-RESOURCE-${stamp}-${index + 1}`) } });
+  const workshopCodes = Array.from({ length: 5 }, (_, index) => `E2E-WORKSHOP-${stamp}-${index + 1}`);
+  await api(request, "/api/ops/codes/import", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `E2E-PORTAL-${code}`) } });
   await api(request, "/api/ops/event-links", { method: "PUT", staff: login.staffSession, admin: admin.adminSession, body: { workshopUrl: "https://example.com/workshop-e2e", gamePortalUrl: "https://agentic-football.aws.dev/" } });
   await api(request, `/api/ops/teams/${team.team.id}/issue-code`, { method: "POST", staff: login.staffSession, body: {} });
 

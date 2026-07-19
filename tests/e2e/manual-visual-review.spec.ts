@@ -51,7 +51,8 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await page.reload();
     await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
     await capture(page, testInfo, "03-participant-staff-assigned-team");
-    await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { codes: Array.from({ length: 12 }, (_, index) => `VISUAL-REVIEW-${stamp}-${index + 1}`) } });
+    const workshopCodes = Array.from({ length: 12 }, (_, index) => `VISUAL-WORKSHOP-${stamp}-${index + 1}`);
+    await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `VISUAL-PORTAL-${code}`) } });
     await api(request, `/api/ops/teams/${selfTeam.id}/issue-code`, { method: "POST", staff, body: {} });
     await page.goto("/");
     await page.getByRole("button", { name: "我的二维码" }).click();

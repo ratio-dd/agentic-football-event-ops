@@ -98,7 +98,8 @@ async function register(name, client) {
 }
 async function makeTeam(sessions, people) { return (await api("/api/ops/teams", { method: "POST", staff: sessions.staff, body: { memberIds: people.map((person) => person.id) } })).team; }
 async function importCodes(sessions, count = 32) {
-  await api("/api/ops/codes/import", { method: "POST", staff: sessions.staff, admin: sessions.admin, body: { codes: Array.from({ length: count }, (_, index) => `ACCEPT-${scenario.toUpperCase()}-${String(index + 1).padStart(2, "0")}`) } });
+  const workshopCodes = Array.from({ length: count }, (_, index) => `ACCEPT-WORKSHOP-${scenario.toUpperCase()}-${String(index + 1).padStart(2, "0")}`);
+  await api("/api/ops/codes/import", { method: "POST", staff: sessions.staff, admin: sessions.admin, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `ACCEPT-PORTAL-${code}`) } });
   await api("/api/ops/event-links", { method: "PUT", staff: sessions.staff, admin: sessions.admin, body: { workshopUrl: "https://example.com/acceptance-workshop", gamePortalUrl: "https://agentic-football.aws.dev/" } });
 }
 async function issue(sessions, team) { await api(`/api/ops/teams/${team.id}/issue-code`, { method: "POST", staff: sessions.staff, body: {} }); }
