@@ -42,6 +42,7 @@ test("onsite state machine keeps team assignment in the Staff workflow", async (
   const worker = await read("worker/index.ts");
   assert.match(worker, /\/api\/participants\/rebind/);
   assert.match(worker, /\/api\/ops\/codes\/import/);
+  assert.match(worker, /\/api\/admin\/codes\/game-portal\/backfill/);
   assert.match(worker, /issueCode\(s, teamId\(pathname\)/);
   assert.match(worker, /codeVisibleClientIds/);
   assert.match(worker, /qualificationStatus = "ta_qualified"/);
@@ -160,12 +161,15 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   assert.equal(issuedSecond.response.status, 200);
   const gameImported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["PORTAL-001", "PORTAL-002"] } });
   assert.equal(gameImported.response.status, 200);
-  const portalIssued = await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-game-portal-code`, { method: "POST", staff, body: {} });
+  const portalIssued = await call(worker, db, "/api/admin/codes/game-portal/backfill", { method: "POST", staff, admin, body: {} });
   assert.equal(portalIssued.response.status, 200);
+  assert.equal(portalIssued.data.assigned, 2);
   const portalView = await call(worker, db, "/api/state", { client: "pair-code-a" });
   assert.equal(portalView.data.currentTeam.gamePortalCode, "PORTAL-001");
+  const secondPortalView = await call(worker, db, "/api/state", { client: "pair-code-b" });
+  assert.equal(secondPortalView.data.currentTeam.gamePortalCode, "PORTAL-002");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 1, issued: 1 }, pairsAvailable: 0, pairsIssued: 1 });
+  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 0, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
 });
 
 test("staff can group people, issue an official code, and a rebound browser restores it", async () => {

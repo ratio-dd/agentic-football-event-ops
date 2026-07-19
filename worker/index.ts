@@ -48,6 +48,7 @@ const worker = {
       if (/^\/api\/ops\/teams\/[^/]+\/confirm$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => confirmTeam(s, teamId(pathname), staff));
       if (pathname === "/api/ops/codes/import" && request.method === "POST") return admin ? mutation(env, request, (s) => importCodes(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/event-links" && request.method === "PUT") return admin ? mutation(env, request, (s) => setEventLinks(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
+      if (pathname === "/api/admin/codes/game-portal/backfill" && request.method === "POST") return admin ? mutation(env, request, (s) => backfillGamePortalCodes(s, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (/^\/api\/admin\/teams\/[^/]+\/reclaim-code$/.test(pathname) && request.method === "POST") return admin ? mutation(env, request, (s) => reclaimCode(s, teamId(pathname), admin)) : json({ error: "需要管理后台权限" }, 403);
       if (/^\/api\/ops\/teams\/[^/]+\/issue-code$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => issueCode(s, teamId(pathname), staff));
       if (/^\/api\/ops\/teams\/[^/]+\/issue-game-portal-code$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => issueGamePortalCode(s, teamId(pathname), staff));
@@ -203,7 +204,7 @@ function teamView(s: State, t: any, clientId = "") {
 }
 async function publicView(env: Env, request: Request) { const { state } = await stateOf(env.DB); const clientId = client(request); const participant = state.participants.find((p: any) => p.clientIds.includes(clientId)); const currentTeam = participant?.teamId ? teamView(state, team(state, participant.teamId), clientId) : null; return { event: state.event, currentParticipant: participant ? publicParticipant(participant, clientId) : null, currentTeam, tournament: publicTournament(state) }; }
 async function staffView(env: Env) { const { state } = await stateOf(env.DB); const active = state.teams.filter((t: any) => t.status !== "dissolved"); const manualTeams = active.filter((t: any) => t.type === "manual"); const automaticTeams = active.filter((t: any) => t.type === "auto"); const freePeople = state.participants.filter((p: any) => !p.teamId && p.allocationSource !== "waitlist"); const waitlist = state.participants.filter((p: any) => p.allocationSource === "waitlist"); const conflicts = allocationValidation(state).conflicts; return { event: state.event, codeSummary: codeSummary(state), competition: state.competition, participants: state.participants.map((p: any) => ({ ...p, clientIds: undefined, codeVisibleClientIds: undefined })), teams: state.teams.map((t: any) => teamView(state, t)), allocation: { resourceLimit: 32, freePeople: freePeople.map((p: any) => publicParticipant(p, "")), waitlist: waitlist.map((p: any) => ({ ...publicParticipant(p, ""), waitlistReason: p.waitlistReason || "CAPACITY_EXHAUSTED" })), manualTeams: manualTeams.map((t: any) => teamView(state, t)), automaticTeams: automaticTeams.map((t: any) => teamView(state, t)), conflicts, lowAttendanceSuggestions: lowAttendanceSuggestions(state), latestPreview: state.allocationRuns.filter((r: any) => r.status === "preview").at(-1) || null, latestPublished: state.allocationRuns.filter((r: any) => r.status === "published").at(-1) || null, runs: state.allocationRuns.slice(-20).reverse(), manualSplitAudits: state.manualSplitAudits.slice(-50).reverse() }, tournament: publicTournament(state), auditLog: state.auditLog.slice(-100).reverse() }; }
-async function adminView(env: Env) { const staff = await staffView(env); const { state } = await stateOf(env.DB); const reclaimableTeams = state.teams.filter((team: any) => team.status === "dissolved" && teamHasIssuedCodes(team)).map((team: any) => teamView(state, team)); return { ...staff, feedback: state.feedback.slice(-100).reverse(), reclaimableTeams }; }
+async function adminView(env: Env) { const staff = await staffView(env); const { state } = await stateOf(env.DB); const reclaimableTeams = state.teams.filter((team: any) => team.status === "dissolved" && teamHasIssuedCodes(team)).map((team: any) => teamView(state, team)); const gamePortalBackfillTeams = gamePortalBackfillTargets(state).map((team: any) => teamView(state, team)); return { ...staff, feedback: state.feedback.slice(-100).reverse(), reclaimableTeams, gamePortalBackfillTeams }; }
 async function displayView(env: Env) { const { state } = await stateOf(env.DB); return { event: state.event, tournament: publicTournament(state) }; }
 async function participantSearch(env: Env, q: string) { const { state } = await stateOf(env.DB); const key = q.trim().toLowerCase(); const numberKey = key.replace(/^p[-\s]?/, "").replace(/^0+/, ""); const participants = state.participants.filter((p: any) => { const number = p.staffShortId.toLowerCase().replace(/^p-?0*/, ""); return !key || p.nickname.toLowerCase().includes(key) || p.staffShortId.toLowerCase().includes(key) || (Boolean(numberKey) && number.includes(numberKey)); }).sort((a: any, b: any) => Number(b.staffShortId.toLowerCase() === key) - Number(a.staffShortId.toLowerCase() === key) || Number(b.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey) - Number(a.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey)).slice(0, 8).map((p: any) => ({ id: p.id, nickname: p.nickname, staffShortId: p.staffShortId, teamId: p.teamId, supportProfile: p.supportProfile })); return { participants }; }
 function publicTournament(s: State) {
@@ -462,6 +463,27 @@ function issueGamePortalCode(s: State, value: string, actor: Staff) {
   const issuedAt = now(); code.status = "assigned"; code.teamId = t.id; code.assignedAt = issuedAt; code.assignedBy = actor.id; t.gamePortalCodeId = code.id;
   t.memberIds.forEach((memberId: string) => { const p = s.participants.find((x: any) => x.id === memberId); p?.clientIds.forEach((clientId: string) => { if (!p.codeVisibleClientIds.includes(clientId)) p.codeVisibleClientIds.push(clientId); }); });
   audit(s, actor, "game_portal.code.issued", "team", t.id); return { team: t };
+}
+function gamePortalBackfillTargets(s: State) {
+  return s.teams.filter((t: any) => t.status !== "dissolved" && t.workshopCodeId && !t.gamePortalCodeId)
+    .sort((a: any, b: any) => {
+      const aAt = s.workshopCodes.find((code: any) => code.id === a.workshopCodeId)?.assignedAt || a.codeIssuedAt || "";
+      const bAt = s.workshopCodes.find((code: any) => code.id === b.workshopCodeId)?.assignedAt || b.codeIssuedAt || "";
+      return aAt.localeCompare(bAt) || a.teamNumber.localeCompare(b.teamNumber);
+    });
+}
+function backfillGamePortalCodes(s: State, actor: Staff) {
+  if (!s.event.gates.codeIssuance) return fail("Code 发放已关闭", 409);
+  const targets = gamePortalBackfillTargets(s); const available = s.gamePortalCodes.filter((item: any) => item.status === "available");
+  if (!targets.length) return fail("没有需要补发 Game Portal Code 的队伍", 409);
+  if (!available.length) return fail("没有可用的 Game Portal Code", 409);
+  const issuedAt = now(); const filled = targets.slice(0, available.length);
+  filled.forEach((t: any, index: number) => {
+    const code = available[index]; code.status = "assigned"; code.teamId = t.id; code.assignedAt = issuedAt; code.assignedBy = actor.id; t.gamePortalCodeId = code.id;
+    t.memberIds.forEach((memberId: string) => { const p = s.participants.find((x: any) => x.id === memberId); p?.clientIds.forEach((clientId: string) => { if (!p.codeVisibleClientIds.includes(clientId)) p.codeVisibleClientIds.push(clientId); }); });
+  });
+  audit(s, actor, "game_portal.code.backfilled", "event", s.event.id, `${filled.length}/${targets.length}`);
+  return { assigned: filled.length, remaining: targets.length - filled.length, teams: filled.map((t: any) => t.id) };
 }
 async function setWorkshopNote(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const t = team(s, value); if (!t || !teamHasIssuedCodes(t)) return fail("未发放 Code 的队伍不能添加 Workshop 备注", 409); t.workshopNote = text(b.note, 120); audit(s, actor, "workshop.note.updated", "team", t.id, t.workshopNote); return { team: t }; }
 function qualify(s: State, value: string, actor: Staff) { if (!s.event.gates.qualification) return fail("参赛资格确认已关闭", 409); const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (!teamHasIssuedCodes(t)) return fail("未发放 Code 的队伍不能确认参赛", 409); t.qualificationStatus = "ta_qualified"; t.status = "ta_qualified"; t.qualifiedAt = now(); audit(s, actor, "team.ta.qualified", "team", t.id, "Game Portal practice match checked"); return { team: t }; }

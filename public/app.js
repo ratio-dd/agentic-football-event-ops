@@ -93,6 +93,7 @@ const api = {
   confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
   updateEventGates: (gates) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true }),
   importResourceCodes: ({ workshopCodes, gamePortalCodes }) => request("/api/ops/codes/import", { method: "POST", body: { workshopCodes, gamePortalCodes }, staff: true }),
+  backfillGamePortalCodes: () => request("/api/admin/codes/game-portal/backfill", { method: "POST", body: {}, staff: true }),
   setEventLinks: (workshopUrl, gamePortalUrl) => request("/api/ops/event-links", { method: "PUT", body: { workshopUrl, gamePortalUrl }, staff: true }),
   reclaimCode: (teamId) => request(`/api/admin/teams/${teamId}/reclaim-code`, { method: "POST", body: {}, staff: true }),
   issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
