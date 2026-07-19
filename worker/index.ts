@@ -50,6 +50,7 @@ const worker = {
       if (pathname === "/api/ops/event-links" && request.method === "PUT") return admin ? mutation(env, request, (s) => setEventLinks(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (/^\/api\/admin\/teams\/[^/]+\/reclaim-code$/.test(pathname) && request.method === "POST") return admin ? mutation(env, request, (s) => reclaimCode(s, teamId(pathname), admin)) : json({ error: "需要管理后台权限" }, 403);
       if (/^\/api\/ops\/teams\/[^/]+\/issue-code$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => issueCode(s, teamId(pathname), staff));
+      if (/^\/api\/ops\/teams\/[^/]+\/issue-game-portal-code$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => issueGamePortalCode(s, teamId(pathname), staff));
       if (/^\/api\/ops\/workshop\/teams\/[^/]+\/note$/.test(pathname) && request.method === "PUT") return mutation(env, request, (s) => setWorkshopNote(s, teamId(pathname), request, staff));
       if (/^\/api\/ops\/qualification\/teams\/[^/]+\/confirm$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => qualify(s, teamId(pathname), staff));
       if (/^\/api\/ops\/qualification\/teams\/[^/]+\/revoke$/.test(pathname) && request.method === "POST") return admin ? mutation(env, request, (s) => revokeQualification(s, teamId(pathname), request, admin)) : json({ error: "需要管理后台权限" }, 403);
@@ -446,8 +447,21 @@ function issueCode(s: State, value: string, actor: Staff) {
   if (teamHasIssuedCodes(t)) return fail("该队已收到 Code", 409); if (!['draft', 'ready_code'].includes(t.status)) return fail("该队当前不能发放 Code", 409);
   const issuedAt = now(); workshopCode.status = "assigned"; workshopCode.teamId = t.id; workshopCode.assignedAt = issuedAt; workshopCode.assignedBy = actor.id;
   t.workshopCodeId = workshopCode.id; t.codeIssuedAt = issuedAt; t.codeIssuedBy = actor.id; t.status = "issued";
+  const gamePortalCode = s.gamePortalCodes.find((item: any) => item.status === "available");
+  if (gamePortalCode) { gamePortalCode.status = "assigned"; gamePortalCode.teamId = t.id; gamePortalCode.assignedAt = issuedAt; gamePortalCode.assignedBy = actor.id; t.gamePortalCodeId = gamePortalCode.id; }
   t.memberIds.forEach((memberId: string) => { const p = s.participants.find((x: any) => x.id === memberId); p?.clientIds.forEach((clientId: string) => { if (!p.codeVisibleClientIds.includes(clientId)) p.codeVisibleClientIds.push(clientId); }); });
-  audit(s, actor, "workshop.code.issued", "team", t.id); return { team: t };
+  audit(s, actor, "workshop.code.issued", "team", t.id, gamePortalCode ? "Workshop + Game Portal" : "Workshop"); return { team: t };
+}
+function issueGamePortalCode(s: State, value: string, actor: Staff) {
+  if (!s.event.gates.codeIssuance) return fail("Code 发放已关闭", 409);
+  const t = team(s, value); if (!t) return fail("队伍不存在", 404);
+  if (!t.workshopCodeId) return fail("请先发放 Workshop Code", 409);
+  if (t.gamePortalCodeId) return fail("该队已收到 Game Portal Code", 409);
+  const code = s.gamePortalCodes.find((item: any) => item.status === "available");
+  if (!code) return fail("没有可用的 Game Portal Code", 409);
+  const issuedAt = now(); code.status = "assigned"; code.teamId = t.id; code.assignedAt = issuedAt; code.assignedBy = actor.id; t.gamePortalCodeId = code.id;
+  t.memberIds.forEach((memberId: string) => { const p = s.participants.find((x: any) => x.id === memberId); p?.clientIds.forEach((clientId: string) => { if (!p.codeVisibleClientIds.includes(clientId)) p.codeVisibleClientIds.push(clientId); }); });
+  audit(s, actor, "game_portal.code.issued", "team", t.id); return { team: t };
 }
 async function setWorkshopNote(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const t = team(s, value); if (!t || !teamHasIssuedCodes(t)) return fail("未发放 Code 的队伍不能添加 Workshop 备注", 409); t.workshopNote = text(b.note, 120); audit(s, actor, "workshop.note.updated", "team", t.id, t.workshopNote); return { team: t }; }
 function qualify(s: State, value: string, actor: Staff) { if (!s.event.gates.qualification) return fail("参赛资格确认已关闭", 409); const t = team(s, value); if (!t) return fail("队伍不存在", 404); if (!teamHasIssuedCodes(t)) return fail("未发放 Code 的队伍不能确认参赛", 409); t.qualificationStatus = "ta_qualified"; t.status = "ta_qualified"; t.qualifiedAt = now(); audit(s, actor, "team.ta.qualified", "team", t.id, "Game Portal practice match checked"); return { team: t }; }

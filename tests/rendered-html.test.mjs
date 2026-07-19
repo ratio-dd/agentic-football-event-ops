@@ -160,8 +160,12 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   assert.equal(issuedSecond.response.status, 200);
   const gameImported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["PORTAL-001", "PORTAL-002"] } });
   assert.equal(gameImported.response.status, 200);
+  const portalIssued = await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-game-portal-code`, { method: "POST", staff, body: {} });
+  assert.equal(portalIssued.response.status, 200);
+  const portalView = await call(worker, db, "/api/state", { client: "pair-code-a" });
+  assert.equal(portalView.data.currentTeam.gamePortalCode, "PORTAL-001");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 2, issued: 0 }, pairsAvailable: 0, pairsIssued: 0 });
+  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 1, issued: 1 }, pairsAvailable: 0, pairsIssued: 1 });
 });
 
 test("staff can group people, issue an official code, and a rebound browser restores it", async () => {
@@ -184,20 +188,21 @@ test("staff can group people, issue an official code, and a rebound browser rest
   const originalView = await call(worker, db, "/api/state", { client: "phone-a" });
   assert.equal(originalView.data.currentTeam.teamCode, "OFFICIAL-001");
   assert.equal(originalView.data.currentTeam.workshopCode, "OFFICIAL-001");
-  assert.equal(originalView.data.currentTeam.gamePortalCode, null);
+  assert.equal(originalView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-001");
   assert.equal(originalView.data.event.workshopUrl, "https://workshop.example/entry");
   const third = await call(worker, db, "/api/participants", { method: "POST", client: "phone-c", body: { nickname: "小西", supportProfile: {} } });
   const secondGroup = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [third.data.participant.id] } });
   await call(worker, db, `/api/ops/teams/${secondGroup.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   const secondView = await call(worker, db, "/api/state", { client: "phone-c" });
   assert.equal(secondView.data.currentTeam.teamCode, "OFFICIAL-002");
+  assert.equal(secondView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-002");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 2, issued: 0 }, pairsAvailable: 0, pairsIssued: 0 });
+  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 0, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
   await call(worker, db, "/api/participants/rebind", { method: "POST", client: "new-phone", body: { nickname: "阿北" } });
   const reboundView = await call(worker, db, "/api/state", { client: "new-phone" });
   assert.equal(reboundView.data.currentTeam.teamCode, "OFFICIAL-001");
   assert.equal(reboundView.data.currentTeam.workshopCode, "OFFICIAL-001");
-  assert.equal(reboundView.data.currentTeam.gamePortalCode, null);
+  assert.equal(reboundView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-001");
 });
 
 test("Staff assigns teams, while staff search accepts bare participant numbers", async () => {
@@ -238,7 +243,7 @@ test("Staff dispatch is atomic: code visibility follows membership and Admin rec
   const state = await call(worker, db, "/api/ops/state", { staff });
   assert.equal(state.data.teams.find((team) => team.id === westTeam.data.team.id).status, "dissolved");
   assert.equal(state.data.codeSummary.workshop.available, 1);
-  assert.equal(state.data.codeSummary.gamePortal.available, 2);
+  assert.equal(state.data.codeSummary.gamePortal.available, 1);
 });
 
 test("participant QR endpoint renders the current participant's P-number", async () => {

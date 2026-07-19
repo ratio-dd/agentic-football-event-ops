@@ -96,6 +96,7 @@ const api = {
   setEventLinks: (workshopUrl, gamePortalUrl) => request("/api/ops/event-links", { method: "PUT", body: { workshopUrl, gamePortalUrl }, staff: true }),
   reclaimCode: (teamId) => request(`/api/admin/teams/${teamId}/reclaim-code`, { method: "POST", body: {}, staff: true }),
   issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
+  issueGamePortalCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-game-portal-code`, { method: "POST", body: {}, staff: true }),
   workshopNote: (teamId, note = "") => request(`/api/ops/workshop/teams/${teamId}/note`, { method: "PUT", body: { note }, staff: true }),
   qualify: (teamId) => request(`/api/ops/qualification/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
   revokeQualification: (teamId, note) => request(`/api/ops/qualification/teams/${teamId}/revoke`, { method: "POST", body: { note }, staff: true }),
