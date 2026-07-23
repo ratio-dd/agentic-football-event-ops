@@ -331,8 +331,8 @@ test("staff can adjust a draft team and run a frozen group-to-knockout tournamen
   const knockout = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, admin, body: {} });
   assert.equal(knockout.response.status, 200); assert.equal(knockout.data.tournament.knockoutMatches.length, 1);
   const lockedGroupResult = await call(worker, db, `/api/ops/matches/${swapped.data.tournament.matches[0].id}/result`, { method: "POST", staff, body: { scoreA: 0, scoreB: 3 } });
-  assert.equal(lockedGroupResult.response.status, 409);
-  assert.match(lockedGroupResult.data.error, /小组赛赛果已锁定/);
+  assert.equal(lockedGroupResult.response.status, 403);
+  assert.match(lockedGroupResult.data.error, /仅可由 Admin 更正/);
 });
 
 test("group standings calculate goal difference and keep T-numbers in every fixture", async () => {
@@ -434,4 +434,55 @@ test("knockout waits for both winners and can rebuild a corrupted future round",
   const repaired = await call(worker, db, "/api/ops/competition/knockout/rebuild", { method: "POST", staff, admin, body: {} });
   assert.equal(repaired.response.status, 200); assert.equal(repaired.data.tournament.knockoutMatches.filter((match) => match.round === 1 && match.status === "completed").length, firstRound.length);
   assert.equal(repaired.data.tournament.knockoutMatches.filter((match) => match.round === 2).every((match) => match.status === "ready"), true);
+});
+
+test("score corrections require Admin reason and preserve downstream tournament integrity", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "赛果 TA" } });
+  const staff = login.data.staffSession; const admin = await elevate(worker, db, staff); const teams = [];
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(Array.from({ length: 8 }, (_, index) => `RESULT-${index + 1}`)) });
+  for (let index = 1; index <= 8; index += 1) {
+    const person = await call(worker, db, "/api/participants", { method: "POST", client: `result-${index}`, body: { nickname: `赛果队${index}`, supportProfile: {} } });
+    const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } });
+    teams.push(created.data.team);
+    await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+    await call(worker, db, `/api/ops/qualification/teams/${created.data.team.id}/confirm`, { method: "POST", staff, body: {} });
+  }
+  await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((item) => item.id) } });
+  const grouped = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 2, qualifiersPerGroup: 2 } });
+  for (const match of grouped.data.tournament.matches) await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: 1, scoreB: 0 } });
+  const generated = await call(worker, db, "/api/ops/competition/knockout", { method: "POST", staff, admin, body: {} });
+  const originalKnockoutIds = new Set(generated.data.tournament.knockoutMatches.map((match) => match.id));
+  const groupMatch = grouped.data.tournament.matches[0];
+
+  const staffCorrection = await call(worker, db, `/api/ops/matches/${groupMatch.id}/result`, { method: "POST", staff, body: { scoreA: 0, scoreB: 2 } });
+  assert.equal(staffCorrection.response.status, 403);
+  const missingReason = await call(worker, db, `/api/ops/matches/${groupMatch.id}/result`, { method: "POST", staff, admin, body: { scoreA: 0, scoreB: 2 } });
+  assert.equal(missingReason.response.status, 400);
+  const correctedGroup = await call(worker, db, `/api/ops/matches/${groupMatch.id}/result`, { method: "POST", staff, admin, body: { scoreA: 0, scoreB: 2, correctionReason: "现场裁判复核" } });
+  assert.equal(correctedGroup.response.status, 200);
+  assert.equal(correctedGroup.data.tournament.knockoutMatches.every((match) => !originalKnockoutIds.has(match.id)), true);
+
+  const semifinals = correctedGroup.data.tournament.knockoutMatches.filter((match) => match.round === 1);
+  for (const match of semifinals) await call(worker, db, `/api/ops/matches/${match.id}/result`, { method: "POST", staff, body: { scoreA: 2, scoreB: 0 } });
+  const beforeSemifinalCorrection = await call(worker, db, "/api/ops/state", { staff });
+  const finalBefore = beforeSemifinalCorrection.data.tournament.knockoutMatches.find((match) => match.round === 2);
+  assert.equal(finalBefore.status, "ready");
+  const correctedSemifinal = await call(worker, db, `/api/ops/matches/${semifinals[0].id}/result`, { method: "POST", staff, admin, body: { scoreA: 0, scoreB: 3, correctionReason: "裁判确认记反胜方" } });
+  assert.equal(correctedSemifinal.response.status, 200);
+  const finalAfter = correctedSemifinal.data.tournament.knockoutMatches.find((match) => match.round === 2);
+  assert.equal(finalAfter.teamAId, semifinals[0].teamBId);
+  assert.equal(finalAfter.status, "ready");
+  assert.equal(finalAfter.scoreA, null); assert.equal(finalAfter.scoreB, null); assert.equal(finalAfter.winnerId, null);
+
+  await call(worker, db, `/api/ops/matches/${finalAfter.id}/result`, { method: "POST", staff, body: { scoreA: 1, scoreB: 0 } });
+  const beforeRejectedCorrection = JSON.parse(db.row.data);
+  const rejected = await call(worker, db, `/api/ops/matches/${semifinals[0].id}/result`, { method: "POST", staff, admin, body: { scoreA: 4, scoreB: 0, correctionReason: "不应覆盖已完成决赛" } });
+  assert.equal(rejected.response.status, 409);
+  assert.match(rejected.data.error, /下游比赛已有赛果/);
+  assert.deepEqual(JSON.parse(db.row.data), beforeRejectedCorrection);
+  const corrections = beforeRejectedCorrection.auditLog.filter((entry) => entry.action === "match.result.corrected");
+  assert.equal(corrections.length, 2);
+  assert.match(corrections[0].reason, /现场裁判复核/);
+  assert.match(corrections[1].reason, /裁判确认记反胜方/);
 });

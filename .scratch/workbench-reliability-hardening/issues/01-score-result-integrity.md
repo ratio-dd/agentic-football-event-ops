@@ -1,4 +1,4 @@
-Status: pending
+Status: completed
 
 # 01 赛果修正与下游一致性
 
@@ -19,4 +19,7 @@ Status: pending
 - group、semifinal、final 关键路径均有不变量验证。
 
 ## Comments
-- 暂无。
+- 2026-07-24：先补充失败测试，旧实现对 Staff 更正返回旧的锁定逻辑，且无法安全重算下游。
+- 2026-07-24：实现 Staff 首次录入、Admin 带原因修正、下游完成前置拒绝、group bracket 重建和 knockout descendants 清理/重算。
+- 验证：`npm run build`、`node --test tests/rendered-html.test.mjs`（16/16）、`npm run lint` 通过。
+- Git：实现、测试与本任务证据由同一原子提交收口。

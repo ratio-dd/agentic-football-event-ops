@@ -72,7 +72,7 @@ const worker = {
       if (pathname === "/api/ops/competition/knockout" && request.method === "POST") return admin ? mutation(env, request, (s) => generateKnockout(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/knockout/rebuild" && request.method === "POST") return admin ? mutation(env, request, (s) => rebuildKnockout(s, admin)) : json({ error: "需要管理后台权限" }, 403);
       if (pathname === "/api/ops/competition/void" && request.method === "POST") return admin ? mutation(env, request, (s) => voidTournament(s, request, admin)) : json({ error: "需要管理后台权限" }, 403);
-      if (/^\/api\/ops\/matches\/[^/]+\/result$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => recordResult(s, matchId(pathname), request, staff));
+      if (/^\/api\/ops\/matches\/[^/]+\/result$/.test(pathname) && request.method === "POST") return mutation(env, request, (s) => recordResult(s, matchId(pathname), request, staff, admin));
       return json({ error: "Not found" }, 404);
     } catch (error) { return json({ error: error instanceof Error ? error.message : "服务暂时不可用" }, 500); }
   },
@@ -655,6 +655,32 @@ function nextKnockoutRounds(previous: any[]) {
   }
   return matches;
 }
+function knockoutMatchesFor(qualified: string[]) {
+  let bracketSize = 1; while (bracketSize < qualified.length) bracketSize *= 2;
+  const seeds = [...qualified, ...Array(Math.max(0, bracketSize - qualified.length)).fill(null)];
+  const firstRound = Array.from({ length: bracketSize / 2 }, (_, index) => ({ id: id(), stage: "knockout", round: 1, teamAId: seeds[index], teamBId: seeds[bracketSize - 1 - index], sourceAId: null, sourceBId: null, status: "pending", scoreA: null, scoreB: null, winnerId: null }));
+  return [...firstRound, ...nextKnockoutRounds(firstRound)];
+}
+function qualifiedTeamIds(s: State, tournament: any) {
+  return tournament.groups.flatMap((group: any) => standings(s, tournament, group).slice(0, tournament.qualifiersPerGroup).map((row: any) => row.teamId));
+}
+function knockoutDescendants(tournament: any, sourceMatchId: string) {
+  const matches = tournament.knockoutMatches || []; const affected = new Set([sourceMatchId]); let changed = true;
+  while (changed) {
+    changed = false;
+    matches.forEach((match: any) => {
+      if (!affected.has(match.id) && (affected.has(match.sourceAId) || affected.has(match.sourceBId))) { affected.add(match.id); changed = true; }
+    });
+  }
+  return matches.filter((match: any) => match.id !== sourceMatchId && affected.has(match.id));
+}
+function resetKnockoutMatches(matches: any[]) {
+  matches.forEach((match: any) => {
+    if (match.sourceAId) match.teamAId = null;
+    if (match.sourceBId) match.teamBId = null;
+    match.scoreA = null; match.scoreB = null; match.winnerId = null; match.status = "pending";
+  });
+}
 function rebuildKnockout(s: State, actor: Staff) {
   const tournament = s.tournament; if (!tournament || tournament.status !== "knockout") return fail("当前没有可重建的淘汰赛", 409);
   const roundOne = (tournament.knockoutMatches || []).filter((match: any) => match.round === 1);
@@ -664,9 +690,38 @@ function rebuildKnockout(s: State, actor: Staff) {
   audit(s, actor, "tournament.knockout.rebuilt", "tournament", tournament.id, `from ${roundOne.length} winners`);
   return { tournament: publicTournament(s) };
 }
-async function generateKnockout(s: State, request: Request, actor: Staff) { const tournament = s.tournament; if (!tournament || tournament.status !== "group") return fail("请先生成并完成小组赛", 409); if (tournament.matches.some((m: any) => m.status !== "completed")) return fail("请先录入全部小组赛结果", 409); if (tournament.knockoutMatches?.length) return fail("淘汰赛已生成", 409); const qualified = tournament.groups.flatMap((group: any) => standings(s, tournament, group).slice(0, tournament.qualifiersPerGroup).map((row: any) => row.teamId)); if (qualified.length < 2) return fail("晋级队伍不足", 409); let bracketSize = 1; while (bracketSize < qualified.length) bracketSize *= 2; const seeds = [...qualified, ...Array(Math.max(0, bracketSize - qualified.length)).fill(null)]; const matches: any[] = []; let previous: any[] = []; for (let index = 0; index < bracketSize / 2; index += 1) previous.push({ id: id(), stage: "knockout", round: 1, teamAId: seeds[index], teamBId: seeds[bracketSize - 1 - index], sourceAId: null, sourceBId: null, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...previous); let round = 2; while (previous.length > 1) { const next: any[] = []; for (let index = 0; index < previous.length; index += 2) next.push({ id: id(), stage: "knockout", round, teamAId: null, teamBId: null, sourceAId: previous[index].id, sourceBId: previous[index + 1].id, status: "pending", scoreA: null, scoreB: null, winnerId: null }); matches.push(...next); previous = next; round += 1; } tournament.knockoutMatches = matches; tournament.status = "knockout"; resolveKnockout(tournament); audit(s, actor, "tournament.knockout.generated", "tournament", tournament.id, `${qualified.length} teams`); return { tournament: publicTournament(s) }; }
+async function generateKnockout(s: State, request: Request, actor: Staff) { const tournament = s.tournament; if (!tournament || tournament.status !== "group") return fail("请先生成并完成小组赛", 409); if (tournament.matches.some((m: any) => m.status !== "completed")) return fail("请先录入全部小组赛结果", 409); if (tournament.knockoutMatches?.length) return fail("淘汰赛已生成", 409); const qualified = qualifiedTeamIds(s, tournament); if (qualified.length < 2) return fail("晋级队伍不足", 409); tournament.knockoutMatches = knockoutMatchesFor(qualified); tournament.status = "knockout"; resolveKnockout(tournament); audit(s, actor, "tournament.knockout.generated", "tournament", tournament.id, `${qualified.length} teams`); return { tournament: publicTournament(s) }; }
 async function voidTournament(s: State, request: Request, actor: Staff) { if (!s.event.gates.scheduleEditing) return fail("赛程与名单调整已关闭", 409); if (!s.tournament) return fail("当前没有赛程", 409); const tournamentId = s.tournament.id; s.tournament = null; s.competition = { frozenTeamIds: [], frozenTeams: [], frozenAt: null, frozenBy: null }; audit(s, actor, "tournament.voided", "tournament", tournamentId, text((await body(request)).reason, 120)); return { voidedTournamentId: tournamentId }; }
-async function recordResult(s: State, value: string, request: Request, actor: Staff) { const b = await body(request); const tournament = s.tournament; const m = tournament?.matches.find((x: any) => x.id === value) || tournament?.knockoutMatches?.find((x: any) => x.id === value); const a = Number(b.scoreA), z = Number(b.scoreB); if (!m || !Number.isInteger(a) || !Number.isInteger(z) || a < 0 || z < 0 || !m.teamAId || !m.teamBId) return fail("赛果无效", 400); if (m.stage === "group" && tournament?.knockoutMatches?.length) return fail("淘汰赛已生成，小组赛赛果已锁定；如需更正，请先由 Admin 作废赛程并重新生成", 409); if (m.stage === "knockout" && a === z) return fail("淘汰赛必须分出胜负，请重赛后录入", 409); m.scoreA = a; m.scoreB = z; m.status = "completed"; m.winnerId = a > z ? m.teamAId : z > a ? m.teamBId : null; if (m.stage === "knockout") resolveKnockout(tournament); audit(s, actor, "match.result.recorded", "match", m.id, `${a}:${z}`); return { match: m, tournament: publicTournament(s) }; }
+async function recordResult(s: State, value: string, request: Request, actor: Staff, admin: Staff | null) {
+  const b = await body(request); const tournament = s.tournament;
+  const match = tournament?.matches.find((candidate: any) => candidate.id === value) || tournament?.knockoutMatches?.find((candidate: any) => candidate.id === value);
+  const scoreA = Number(b.scoreA), scoreB = Number(b.scoreB);
+  if (!match || !Number.isInteger(scoreA) || !Number.isInteger(scoreB) || scoreA < 0 || scoreB < 0 || !match.teamAId || !match.teamBId) return fail("赛果无效", 400);
+  if (match.stage === "knockout" && scoreA === scoreB) return fail("淘汰赛必须分出胜负，请重赛后录入", 409);
+
+  const correction = match.status === "completed"; const correctionReason = text(b.correctionReason, 120);
+  if (correction && !admin) return fail("已有赛果仅可由 Admin 更正", 403);
+  if (correction && !correctionReason) return fail("Admin 更正赛果时必须填写原因", 400);
+
+  let downstream: any[] = [];
+  if (correction && match.stage === "group" && tournament.knockoutMatches?.length) downstream = tournament.knockoutMatches;
+  if (correction && match.stage === "knockout") downstream = knockoutDescendants(tournament, match.id);
+  if (downstream.some((candidate: any) => candidate.status === "completed")) return fail("下游比赛已有赛果，不能直接更正；请由 Admin 作废赛程后重建", 409);
+
+  const previous = correction ? `${match.scoreA}:${match.scoreB}` : "";
+  match.scoreA = scoreA; match.scoreB = scoreB; match.status = "completed";
+  match.winnerId = scoreA > scoreB ? match.teamAId : scoreB > scoreA ? match.teamBId : null;
+  if (match.stage === "group" && tournament.knockoutMatches?.length) {
+    tournament.knockoutMatches = knockoutMatchesFor(qualifiedTeamIds(s, tournament));
+    resolveKnockout(tournament);
+  } else if (match.stage === "knockout") {
+    if (correction) resetKnockoutMatches(downstream);
+    resolveKnockout(tournament);
+  }
+  if (correction) audit(s, admin || actor, "match.result.corrected", "match", match.id, `${correctionReason} | ${previous} → ${scoreA}:${scoreB}`);
+  else audit(s, actor, "match.result.recorded", "match", match.id, `${scoreA}:${scoreB}`);
+  return { match, tournament: publicTournament(s) };
+}
 
 function reclaimCode(s: State, value: string, actor: Staff) {
   const t = team(s, value); if (!t || t.status !== "dissolved" || !teamHasIssuedCodes(t)) return fail("没有可回收的已消耗 Code", 409);

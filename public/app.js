@@ -111,7 +111,7 @@ const api = {
   generateKnockout: () => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true }),
   rebuildKnockout: () => request("/api/ops/competition/knockout/rebuild", { method: "POST", body: {}, staff: true }),
   voidTournament: (reason) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true }),
-  result: (matchId, scoreA, scoreB) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true }),
+  result: (matchId, scoreA, scoreB, correctionReason = "") => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB, correctionReason }, staff: true }),
 };
 
 async function refresh() {
@@ -132,7 +132,7 @@ function render() {
   const rerender = async () => refresh();
   const logout = () => { sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = ""; history.pushState({}, "", "/"); refresh(); };
   if (location.pathname === "/admin") renderAdmin(surface, context.state, api, { refresh: rerender, ui: context.adminUi, hasAdmin: Boolean(context.adminSession), returnToStaff: () => { history.pushState({}, "", "/staff"); refresh(); } });
-  else if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), logout });
+  else if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), isAdmin: Boolean(context.adminSession), logout });
   else renderParticipant(surface, context.state, api, rerender);
   if (context.feedbackOpen) surface.insertAdjacentHTML("beforeend", feedbackModal());
   restoreDrafts(surface);
