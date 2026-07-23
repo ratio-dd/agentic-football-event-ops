@@ -150,15 +150,47 @@ test("admin diagnostics reports resource bindings without exposing code values",
   assert.deepEqual(after.data.workshop.activeTeamsMissingCode, []); assert.equal(after.data.workshop.assigned, 1); assert.equal(after.data.integrity, "ok");
 });
 
-test("temporary public maintenance snapshot can be disabled by an administrator", async () => {
+test("resource access matrix keeps Code and PIN values out of public and diagnostic JSON", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
   const person = await call(worker, db, "/api/participants", { method: "POST", client: "public-maintenance-phone", body: { nickname: "快照队员", supportProfile: {} } });
+  await call(worker, db, "/api/participants", { method: "POST", client: "other-phone", body: { nickname: "其他队员", supportProfile: {} } });
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "快照 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
   const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [person.data.participant.id] } });
-  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(["VISIBLE-WORKSHOP"]) });
+  const secrets = ["CANARY-WORKSHOP-CODE", "PORTAL-CANARY-WORKSHOP-CODE", "test-staff", "test-admin"];
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes([secrets[0]]) });
   await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+
+  const participant = await call(worker, db, "/api/state", { client: "public-maintenance-phone" });
+  assert.equal(participant.data.currentTeam.workshopCode, secrets[0]);
+  assert.equal(participant.data.currentTeam.gamePortalCode, secrets[1]);
+  const otherParticipant = await call(worker, db, "/api/state", { client: "other-phone" });
+  assert.equal(otherParticipant.data.currentTeam, null);
+  assert.equal(secrets.slice(0, 2).some((secret) => JSON.stringify(otherParticipant.data).includes(secret)), false);
+
+  const staffState = await call(worker, db, "/api/ops/state", { staff });
+  assert.equal(staffState.data.teams[0].workshopCode, secrets[0]);
+  assert.equal(staffState.data.teams[0].gamePortalCode, secrets[1]);
+  const adminState = await call(worker, db, "/api/admin/state", { staff, admin });
+  assert.equal(adminState.data.teams[0].workshopCode, secrets[0]);
+
+  const initiallyClosed = await call(worker, db, "/api/maintenance/snapshot");
+  assert.equal(initiallyClosed.response.status, 404);
+  const legacyState = JSON.parse(db.row.data); legacyState.event.gates.publicMaintenanceSnapshot = true; delete legacyState.event.publicMaintenanceSnapshotEnabledAt; db.row.data = JSON.stringify(legacyState);
+  const legacyDefaultClosed = await call(worker, db, "/api/maintenance/snapshot");
+  assert.equal(legacyDefaultClosed.response.status, 404);
+  await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { publicMaintenanceSnapshot: true } } });
   const visible = await call(worker, db, "/api/maintenance/snapshot");
-  assert.equal(visible.response.status, 200); assert.equal(visible.data.temporary, true); assert.equal(visible.data.teams[0].workshopCode, "VISIBLE-WORKSHOP");
+  assert.equal(visible.response.status, 200); assert.equal(visible.data.temporary, true); assert.equal(visible.data.redacted, true);
+  assert.equal(visible.data.teams[0].workshopCodeAssigned, true); assert.equal(visible.data.teams[0].gamePortalCodeAssigned, true);
+
+  const anonymousState = await call(worker, db, "/api/state");
+  const display = await call(worker, db, "/api/display");
+  const diagnostics = await call(worker, db, "/api/admin/diagnostics", { staff, admin });
+  for (const [label, payload] of [["anonymous state", anonymousState.data], ["display", display.data], ["maintenance", visible.data], ["diagnostics", diagnostics.data]]) {
+    const serialized = JSON.stringify(payload);
+    for (const secret of secrets) assert.equal(serialized.includes(secret), false, `${label} 不应包含 ${secret}`);
+  }
+
   await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { publicMaintenanceSnapshot: false } } });
   const closed = await call(worker, db, "/api/maintenance/snapshot");
   assert.equal(closed.response.status, 404);

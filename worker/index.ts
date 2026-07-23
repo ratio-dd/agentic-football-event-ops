@@ -97,10 +97,10 @@ async function mutation(env: Env, request: Request, action: (s: State) => any): 
   return json({ error: "现场数据刚刚发生变化，请重试" }, 409);
 }
 
-function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true, publicMaintenanceSnapshot: true }; }
+function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true, publicMaintenanceSnapshot: false }; }
 const DEMO_WORKSHOP_URL = "https://example.com/agentic-football-workshop";
 const GAME_PORTAL_URL = "https://agentic-football.aws.dev/";
-function initialState() { return { event: { id: EVENT_ID, name: "Agentic Football 现场运营台", maxWorkshopTeams: 32, workshopUrl: DEMO_WORKSHOP_URL, gamePortalUrl: GAME_PORTAL_URL, gates: defaultGates() }, participants: [], teams: [], allocationRuns: [], manualSplitAudits: [], workshopCodes: [], gamePortalCodes: [], competition: { frozenTeamIds: [], frozenAt: null, frozenBy: null }, staffAccounts: [], staffSessions: [], adminSessions: [], tournament: null, auditLog: [], feedback: [] }; }
+function initialState() { return { event: { id: EVENT_ID, name: "Agentic Football 现场运营台", maxWorkshopTeams: 32, workshopUrl: DEMO_WORKSHOP_URL, gamePortalUrl: GAME_PORTAL_URL, gates: defaultGates(), publicMaintenanceSnapshotEnabledAt: null }, participants: [], teams: [], allocationRuns: [], manualSplitAudits: [], workshopCodes: [], gamePortalCodes: [], competition: { frozenTeamIds: [], frozenAt: null, frozenBy: null }, staffAccounts: [], staffSessions: [], adminSessions: [], tournament: null, auditLog: [], feedback: [] }; }
 function normalise(raw: any): State {
   const base = initialState();
   const participants = Array.isArray(raw?.participants) ? raw.participants.map((p: any, index: number) => ({ id: p.id || id(), nickname: p.nickname || `参与者${index + 1}`, clientIds: p.clientIds || (p.clientId ? [p.clientId] : []), codeVisibleClientIds: p.codeVisibleClientIds || (p.clientId ? [p.clientId] : []), staffShortId: p.staffShortId || `P-${String(index + 1).padStart(3, "0")}`, supportProfile: p.supportProfile || { techBackground: p.survey?.role || "unknown", workshopExperience: "unknown" }, teamId: p.teamId || null, allocationSource: p.allocationSource || (p.teamId ? "manual" : "free"), registeredAt: p.registeredAt || p.createdAt || now(), reboundAt: p.reboundAt || null })) : [];
@@ -211,17 +211,17 @@ function codeSummary(s: State) {
   const workshop = summarize(s.workshopCodes); const gamePortal = summarize(s.gamePortalCodes);
   return { workshop, gamePortal, pairsAvailable: Math.min(workshop.available, gamePortal.available), pairsIssued: Math.min(workshop.issued, gamePortal.issued) };
 }
-function teamView(s: State, t: any, clientId = "") {
+function teamView(s: State, t: any, clientId = "", staffAccess = false) {
   const members = t.memberIds.map((memberId: string) => s.participants.find((p: any) => p.id === memberId)).filter(Boolean).map((p: any) => publicParticipant(p, clientId));
   const current = s.participants.find((p: any) => p.clientIds.includes(clientId)); const currentMember = current && t.memberIds.includes(current.id);
-  const showCode = Boolean(currentMember && current.codeVisibleClientIds.includes(clientId));
+  const showCode = staffAccess || Boolean(currentMember && current.codeVisibleClientIds.includes(clientId));
   const workshopCode = s.workshopCodes.find((c: any) => c.id === t.workshopCodeId);
   const gamePortalCode = s.gamePortalCodes.find((c: any) => c.id === t.gamePortalCodeId);
   return { ...t, members, workshopCode: showCode ? workshopCode?.code || null : null, gamePortalCode: showCode ? gamePortalCode?.code || null : null, teamCode: showCode ? workshopCode?.code || null : null, resourceCodesAssigned: Boolean(t.workshopCodeId), gamePortalCodeAssigned: Boolean(t.gamePortalCodeId), teamCodeAssigned: teamHasIssuedCodes(t) };
 }
 async function publicView(env: Env, request: Request) { const { state } = await stateOf(env.DB); const clientId = client(request); const participant = state.participants.find((p: any) => p.clientIds.includes(clientId)); const currentTeam = participant?.teamId ? teamView(state, team(state, participant.teamId), clientId) : null; return { event: state.event, currentParticipant: participant ? publicParticipant(participant, clientId) : null, currentTeam, tournament: publicTournament(state) }; }
-async function staffView(env: Env) { const { state } = await stateOf(env.DB); const active = state.teams.filter((t: any) => t.status !== "dissolved"); const manualTeams = active.filter((t: any) => t.type === "manual"); const automaticTeams = active.filter((t: any) => t.type === "auto"); const freePeople = state.participants.filter((p: any) => !p.teamId && p.allocationSource !== "waitlist"); const waitlist = state.participants.filter((p: any) => p.allocationSource === "waitlist"); const conflicts = allocationValidation(state).conflicts; return { event: state.event, codeSummary: codeSummary(state), competition: state.competition, participants: state.participants.map((p: any) => ({ ...p, clientIds: undefined, codeVisibleClientIds: undefined })), teams: state.teams.map((t: any) => teamView(state, t)), allocation: { resourceLimit: 32, freePeople: freePeople.map((p: any) => publicParticipant(p, "")), waitlist: waitlist.map((p: any) => ({ ...publicParticipant(p, ""), waitlistReason: p.waitlistReason || "CAPACITY_EXHAUSTED" })), manualTeams: manualTeams.map((t: any) => teamView(state, t)), automaticTeams: automaticTeams.map((t: any) => teamView(state, t)), conflicts, lowAttendanceSuggestions: lowAttendanceSuggestions(state), latestPreview: state.allocationRuns.filter((r: any) => r.status === "preview").at(-1) || null, latestPublished: state.allocationRuns.filter((r: any) => r.status === "published").at(-1) || null, runs: state.allocationRuns.slice(-20).reverse(), manualSplitAudits: state.manualSplitAudits.slice(-50).reverse() }, tournament: publicTournament(state), auditLog: state.auditLog.slice(-100).reverse() }; }
-async function adminView(env: Env) { const staff = await staffView(env); const { state } = await stateOf(env.DB); const reclaimableTeams = state.teams.filter((team: any) => team.status === "dissolved" && teamHasIssuedCodes(team)).map((team: any) => teamView(state, team)); const gamePortalBackfillTeams = gamePortalBackfillTargets(state).map((team: any) => teamView(state, team)); return { ...staff, feedback: state.feedback.slice(-100).reverse(), reclaimableTeams, gamePortalBackfillTeams }; }
+async function staffView(env: Env) { const { state } = await stateOf(env.DB); const active = state.teams.filter((t: any) => t.status !== "dissolved"); const manualTeams = active.filter((t: any) => t.type === "manual"); const automaticTeams = active.filter((t: any) => t.type === "auto"); const freePeople = state.participants.filter((p: any) => !p.teamId && p.allocationSource !== "waitlist"); const waitlist = state.participants.filter((p: any) => p.allocationSource === "waitlist"); const conflicts = allocationValidation(state).conflicts; return { event: state.event, codeSummary: codeSummary(state), competition: state.competition, participants: state.participants.map((p: any) => ({ ...p, clientIds: undefined, codeVisibleClientIds: undefined })), teams: state.teams.map((t: any) => teamView(state, t, "", true)), allocation: { resourceLimit: 32, freePeople: freePeople.map((p: any) => publicParticipant(p, "")), waitlist: waitlist.map((p: any) => ({ ...publicParticipant(p, ""), waitlistReason: p.waitlistReason || "CAPACITY_EXHAUSTED" })), manualTeams: manualTeams.map((t: any) => teamView(state, t, "", true)), automaticTeams: automaticTeams.map((t: any) => teamView(state, t, "", true)), conflicts, lowAttendanceSuggestions: lowAttendanceSuggestions(state), latestPreview: state.allocationRuns.filter((r: any) => r.status === "preview").at(-1) || null, latestPublished: state.allocationRuns.filter((r: any) => r.status === "published").at(-1) || null, runs: state.allocationRuns.slice(-20).reverse(), manualSplitAudits: state.manualSplitAudits.slice(-50).reverse() }, tournament: publicTournament(state), auditLog: state.auditLog.slice(-100).reverse() }; }
+async function adminView(env: Env) { const staff = await staffView(env); const { state } = await stateOf(env.DB); const reclaimableTeams = state.teams.filter((team: any) => team.status === "dissolved" && teamHasIssuedCodes(team)).map((team: any) => teamView(state, team, "", true)); const gamePortalBackfillTeams = gamePortalBackfillTargets(state).map((team: any) => teamView(state, team, "", true)); return { ...staff, feedback: state.feedback.slice(-100).reverse(), reclaimableTeams, gamePortalBackfillTeams }; }
 async function adminDiagnostics(env: Env) {
   const { state, version } = await stateOf(env.DB); const active = state.teams.filter((item: any) => item.status !== "dissolved");
   const inspect = (kind: "workshop" | "gamePortal", codes: any[], field: "workshopCodeId" | "gamePortalCodeId") => {
@@ -237,29 +237,22 @@ async function adminDiagnostics(env: Env) {
 }
 async function publicMaintenanceSnapshot(env: Env) {
   const { state, version } = await stateOf(env.DB);
-  if (state.event?.gates?.publicMaintenanceSnapshot === false) return { error: "维护快照已关闭", status: 404 };
+  if (state.event?.gates?.publicMaintenanceSnapshot !== true || !state.event?.publicMaintenanceSnapshotEnabledAt) return { error: "维护快照已关闭", status: 404 };
   const activeTeams = state.teams.filter((team: any) => team.status !== "dissolved");
-  const codeRows = (codes: any[]) => codes.map((item: any) => ({
-    code: item.code,
-    status: item.status,
-    teamNumber: item.teamId ? team(state, item.teamId)?.teamNumber || null : null,
-  }));
   const teamRows = activeTeams.map((item: any) => ({
     teamNumber: item.teamNumber,
     status: item.status,
     memberCount: item.memberIds.length,
-    workshopCode: item.workshopCodeId ? state.workshopCodes.find((code: any) => code.id === item.workshopCodeId)?.code || null : null,
-    gamePortalCode: item.gamePortalCodeId ? state.gamePortalCodes.find((code: any) => code.id === item.gamePortalCodeId)?.code || null : null,
+    workshopCodeAssigned: Boolean(item.workshopCodeId),
+    gamePortalCodeAssigned: Boolean(item.gamePortalCodeId),
   }));
   return {
     temporary: true,
+    redacted: true,
     generatedAt: now(),
     version,
     teams: teamRows,
-    resources: {
-      workshop: codeRows(state.workshopCodes),
-      gamePortal: codeRows(state.gamePortalCodes),
-    },
+    resources: codeSummary(state),
   };
 }
 async function displayView(env: Env) { const { state } = await stateOf(env.DB); return { event: state.event, tournament: publicTournament(state) }; }
@@ -563,7 +556,8 @@ function qualify(s: State, value: string, actor: Staff) { if (!s.event.gates.qua
 async function updateEventGates(s: State, request: Request, actor: Staff) {
   const b = await body(request); const gates = b.gates; if (!gates || typeof gates !== "object") return fail("现场开关无效");
   const next = defaultGates(); Object.keys(next).forEach((key) => { if (typeof gates[key] === "boolean") next[key] = gates[key]; });
-  s.event.gates = next; audit(s, actor, "event.gates.updated", "event", s.event.id, Object.entries(next).filter(([, open]) => !open).map(([key]) => key).join(",") || "all-open"); return { gates: next };
+  s.event.gates = next; s.event.publicMaintenanceSnapshotEnabledAt = next.publicMaintenanceSnapshot ? now() : null;
+  audit(s, actor, "event.gates.updated", "event", s.event.id, Object.entries(next).filter(([, open]) => !open).map(([key]) => key).join(",") || "all-open"); return { gates: next };
 }
 function competitionTeams(s: State) { return s.teams.filter((t: any) => t.qualificationStatus === "ta_qualified"); }
 async function revokeQualification(s: State, value: string, request: Request, actor: Staff) { if (!s.event.gates.qualification) return fail("参赛资格确认已关闭", 409); const t = team(s, value); if (!t || t.qualificationStatus !== "ta_qualified") return fail("该队当前不在参赛名单中", 409); if (s.tournament) return fail("赛程已生成，请先作废赛程后再撤销资格", 409); t.qualificationStatus = "not_qualified"; t.status = "issued"; t.qualificationNote = text((await body(request)).note, 120); s.competition.frozenTeamIds = s.competition.frozenTeamIds.filter((teamId: string) => teamId !== t.id); audit(s, actor, "team.ta.qualification.revoked", "team", t.id, t.qualificationNote); return { team: t }; }

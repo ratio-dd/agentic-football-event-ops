@@ -41,6 +41,8 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await staffLogin(page, `界面 TA ${stamp}`);
   await page.getByRole("button", { name: "Workshop", exact: true }).click();
   await expect(page.getByRole("heading", { name: /待 TA 确认/ })).toBeVisible();
+  await expect(page.getByText(`Workshop Code：${workshopCodes[0]}`, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Game Portal Code：E2E-PORTAL-${workshopCodes[0]}`, { exact: true })).toBeVisible();
   await expect(page.locator(`[data-action="qualify"][data-team-id="${team.team.id}"]`)).toHaveClass(/qualify-button/);
   await expect(page.locator(`[data-action="workshop-note"][data-team-id="${team.team.id}"]`)).toHaveClass(/note-button/);
   await page.screenshot({ path: testInfo.outputPath("staff-workshop-pending.png"), fullPage: true });
