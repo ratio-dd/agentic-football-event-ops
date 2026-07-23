@@ -12,6 +12,7 @@
     "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:lightsail && npm run test:e2e",
     "test:e2e": "playwright test",
     "acceptance:serve": "node scripts/acceptance-demo.mjs",
+    "acceptance:release": "node scripts/release-acceptance.mjs",
     "test:lightsail": "npm run lightsail:build && node --test tests/lightsail-adapter.test.mjs",
     "lightsail:build": "node lightsail/build-worker.mjs",
     "lightsail:start": "npm run lightsail:build && node lightsail/server.mjs",

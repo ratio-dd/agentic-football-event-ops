@@ -32,6 +32,8 @@ jobs:
           ADMIN_PIN=meetup-admin
           EOF
       - run: npm test
+      - name: Run isolated 24/32-team release acceptance
+        run: npm run acceptance:release
       - name: Build immutable Lightsail image on the hosted runner
         run: |
           npm run lightsail:build
