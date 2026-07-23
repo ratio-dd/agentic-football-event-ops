@@ -62,6 +62,31 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await page.screenshot({ path: testInfo.outputPath("participant-resource-links.png"), fullPage: true });
 });
 
+test("参与者求助由 Staff 接单并解决", async ({ page }) => {
+  const stamp = Date.now(); const client = `e2e-help-${stamp}`; const nickname = `求助参与者${stamp}`; const staffNickname = `求助 TA ${stamp}`;
+  await page.goto(`/?acceptanceClient=${client}`);
+  await page.getByRole("textbox", { name: "昵称", exact: true }).fill(nickname);
+  await page.getByRole("button", { name: /完成登记/ }).click();
+  await page.getByLabel("求助类型").selectOption("game_portal");
+  await page.getByRole("button", { name: "呼叫 TA" }).click();
+  await expect(page.getByRole("heading", { name: "求助处理中" })).toBeVisible();
+  await expect(page.getByText("已通知 Staff / TA，请留意现场呼叫")).toBeVisible();
+
+  await staffLogin(page, staffNickname);
+  await page.getByRole("button", { name: "Workshop", exact: true }).click();
+  const requestCard = page.locator("[data-help-request-id]", { hasText: nickname });
+  await expect(requestCard).toContainText("Game Portal 连接或练习赛");
+  await requestCard.getByRole("button", { name: "接单" }).click();
+  await expect(page.locator("[data-help-request-id]", { hasText: nickname })).toContainText(`${staffNickname} 正在处理`);
+  await page.locator("[data-help-request-id]", { hasText: nickname }).getByRole("button", { name: "标记已解决" }).click();
+  await expect(page.locator("[data-help-request-id]", { hasText: nickname })).toHaveCount(0);
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto(`/?acceptanceClient=${client}`);
+  await expect(page.getByText("最近一次求助已解决：Game Portal 连接或练习赛")).toBeVisible();
+  await expect(page.getByRole("button", { name: "呼叫 TA" })).toBeVisible();
+});
+
 test("Admin 冻结并生成赛程，Staff 录入赛果，参与者看到自己的积分和赛程", async ({ page, request }) => {
   const stamp = Date.now(); const login = await staffSession(request, `Admin 边界 ${stamp}`);
   const people = [];

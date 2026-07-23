@@ -70,6 +70,8 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.doesNotMatch(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
   assert.match(participant, /competitionForTeam/);
+  assert.match(participant, /participant-help/);
+  assert.match(participant, /不要填写或口述 Code\/PIN/);
   assert.match(participant, /净胜球/);
   assert.doesNotMatch(participant, /officialLabel/);
   assert.doesNotMatch(participant, /邀请码/);
@@ -94,6 +96,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(staff, /team-board-search/);
   assert.match(staff, /Workshop Code：\$\{team\.workshopCode/);
   assert.match(staff, /team-status-override/);
+  assert.match(staff, /data-action="help-claim"/);
   assert.match(staff, /copy-team-code/);
   assert.match(staff, /data-code-kind="Workshop Team Code"/);
   assert.match(staff, /data-code-kind="Game Portal Code"/);
@@ -105,6 +108,9 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   const staffCompetition = staff.slice(staff.indexOf("function staffCompetition"), staff.indexOf("function staffScoreForm"));
   assert.match(staffCompetition, /第 \$\{round\} 轮/);
   assert.doesNotMatch(staffCompetition, /积分榜/);
+  const currentTeamConfig = staff.slice(staff.indexOf("function teamConfig(state, ui)"), staff.indexOf("function codeTab"));
+  assert.doesNotMatch(currentTeamConfig, /\["ta_qualified",/);
+  assert.match(currentTeamConfig, /参赛资格只能通过专用 TA 确认/);
   assert.match(css, /\.bottom-tabs/);
   assert.match(css, /bottom-tabs-four/);
   assert.match(await read("public/admin-panel.js"), /请从 Staff 工作台进入/);
@@ -113,6 +119,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(await read("public/admin-panel.js"), /重新生成下一轮/);
   assert.match(await read("worker/index.ts"), /\/api\/admin\/diagnostics/);
   assert.match(await read("worker/index.ts"), /\/api\/maintenance\/snapshot/);
+  assert.match(await read("worker/index.ts"), /\/api\/participant\/help-requests/);
   assert.match(css, /group-board-lane/);
   assert.match(app, /competition\/swap/);
   assert.match(app, /acceptanceClient/);
@@ -225,11 +232,15 @@ test("Workshop Code can be imported and issued before Game Portal Code arrives",
   const issued = await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issued.response.status, 200);
   const qualifiedManually = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
-  assert.equal(qualifiedManually.response.status, 200);
-  assert.equal(qualifiedManually.data.team.status, "ta_qualified");
+  assert.equal(qualifiedManually.response.status, 409);
+  assert.match(qualifiedManually.data.error, /专用的 TA 确认动作/);
+  const qualified = await call(worker, db, `/api/ops/qualification/teams/${created.data.team.id}/confirm`, { method: "POST", staff, body: {} });
+  assert.equal(qualified.response.status, 200); assert.equal(qualified.data.team.status, "ta_qualified");
   const restoredToWorkshop = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "issued" } });
-  assert.equal(restoredToWorkshop.response.status, 200);
-  assert.equal(restoredToWorkshop.data.team.status, "issued");
+  assert.equal(restoredToWorkshop.response.status, 409);
+  assert.match(restoredToWorkshop.data.error, /Admin 撤销/);
+  const revoked = await call(worker, db, `/api/ops/qualification/teams/${created.data.team.id}/revoke`, { method: "POST", staff, admin, body: { note: "资格边界测试" } });
+  assert.equal(revoked.response.status, 200); assert.equal(revoked.data.team.status, "issued");
   const cannotReturnToCodeQueue = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ready_code" } });
   assert.equal(cannotReturnToCodeQueue.response.status, 409);
   const afterFirst = await call(worker, db, "/api/state", { client: "pair-code-a" });
@@ -517,4 +528,39 @@ test("score corrections require Admin reason and preserve downstream tournament 
   assert.equal(corrections.length, 2);
   assert.match(corrections[0].reason, /现场裁判复核/);
   assert.match(corrections[1].reason, /裁判确认记反胜方/);
+});
+
+test("participant help requests follow an isolated open-claimed-resolved lifecycle", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  await call(worker, db, "/api/participants", { method: "POST", client: "help-one", body: { nickname: "求助甲", supportProfile: {} } });
+  await call(worker, db, "/api/participants", { method: "POST", client: "help-two", body: { nickname: "求助乙", supportProfile: {} } });
+  const unregistered = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-unknown", body: { category: "workshop_access" } });
+  assert.equal(unregistered.response.status, 403);
+  const freeTextRejected = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "workshop_access", note: "CANARY-SECRET-CODE" } });
+  assert.equal(freeTextRejected.response.status, 400);
+  const created = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "workshop_access" } });
+  assert.equal(created.response.status, 200); assert.equal(created.data.helpRequest.status, "open");
+  const duplicate = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
+  assert.equal(duplicate.response.status, 409);
+  const otherView = await call(worker, db, "/api/state", { client: "help-two" });
+  assert.deepEqual(otherView.data.helpRequests, []);
+
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "求助 TA" } }); const staff = login.data.staffSession;
+  const staffState = await call(worker, db, "/api/ops/state", { staff });
+  assert.equal(staffState.data.helpRequests.length, 1); assert.equal(staffState.data.helpRequests[0].participantNickname, "求助甲");
+  const resolveBeforeClaim = await call(worker, db, `/api/ops/help-requests/${created.data.helpRequest.id}/resolve`, { method: "POST", staff, body: {} });
+  assert.equal(resolveBeforeClaim.response.status, 409);
+  const claimed = await call(worker, db, `/api/ops/help-requests/${created.data.helpRequest.id}/claim`, { method: "POST", staff, body: {} });
+  assert.equal(claimed.response.status, 200); assert.equal(claimed.data.helpRequest.status, "claimed"); assert.equal(claimed.data.helpRequest.claimedByNickname, "求助 TA");
+  const claimedAgain = await call(worker, db, `/api/ops/help-requests/${created.data.helpRequest.id}/claim`, { method: "POST", staff, body: {} });
+  assert.equal(claimedAgain.response.status, 409);
+  const participantClaimed = await call(worker, db, "/api/state", { client: "help-one" });
+  assert.equal(participantClaimed.data.helpRequests[0].status, "claimed");
+  const resolved = await call(worker, db, `/api/ops/help-requests/${created.data.helpRequest.id}/resolve`, { method: "POST", staff, body: {} });
+  assert.equal(resolved.response.status, 200); assert.equal(resolved.data.helpRequest.status, "resolved");
+  const participantResolved = await call(worker, db, "/api/state", { client: "help-one" });
+  assert.equal(participantResolved.data.helpRequests[0].status, "resolved");
+  const nextRequest = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
+  assert.equal(nextRequest.response.status, 200); assert.equal(nextRequest.data.helpRequest.status, "open");
+  assert.equal(JSON.stringify(JSON.parse(db.row.data)).includes("CANARY-SECRET-CODE"), false);
 });

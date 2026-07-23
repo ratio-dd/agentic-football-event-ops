@@ -1,4 +1,4 @@
-Status: pending
+Status: completed
 
 # 03 求助闭环与 qualification 边界
 
@@ -16,4 +16,8 @@ Status: pending
 - 通用状态绕过被拒绝，专用 qualification 正常。
 
 ## Comments
-- 暂无。
+- 2026-07-24：先以失败测试固定两个缺口：通用状态接口可直接设置/撤销 `ta_qualified`；仓库不存在 participant help request API。
+- 2026-07-24：实现无自由文本的四类求助、单 active request、participant 隔离视图、Staff 队列和 `open → claimed → resolved` 持久化状态机。
+- 2026-07-24：通用状态接口不再接受 `ta_qualified`，已确认资格也不能由普通 Staff 降级；确认走专用 TA 动作，撤销走 Admin 动作。
+- 验证：Node tests 17/17、lint 通过；Playwright participant → Staff claim → resolve → participant readback 1/1 通过；canary 自由文本未写入数据库。
+- Git：实现、测试与本任务证据由同一原子提交收口。

@@ -3,6 +3,7 @@ const field = (name, label, options) => `<label>${label}<select name="${name}">$
 const teamStatus = (team) => ({ draft: "队伍已创建，等待工作人员确认", ready_code: "队伍已确认，等待领取 Workshop 资源", issued: "已领取 Workshop 资源", ta_qualified: "已确认进入下午比赛" }[team?.status] || "等待工作人员安排");
 const QR_OPEN_KEY = "afc-event-ops-qr-open";
 const REBIND_OPEN_KEY = "afc-event-ops-rebind-open";
+const helpCategory = (category) => ({ workshop_access: "Workshop 进入或部署", game_portal: "Game Portal 连接或练习赛", team: "队伍与人员", other: "其他现场问题" }[category] || "现场问题");
 let ticketFrameObserver;
 
 const ticketFrame = () => `<svg class="ticket-frame" aria-hidden="true" preserveAspectRatio="none"><path class="ticket-frame-shape"/></svg>`;
@@ -22,6 +23,15 @@ function competitionForTeam(team, tournament) {
     return `<li><div><small>${e(stage)}</small><strong>对阵 ${e(opponent)}</strong></div><em>${e(score)}</em></li>`;
   };
   return `<section class="participant-ticket participant-schedule"><h2>下午比赛</h2>${standing ? `<div class="participant-standings"><article><span>${e(group.id)} 组</span><strong>积分 ${standing.points}</strong></article><article><span>已赛 ${standing.played}</span><strong>净胜球 ${signed(standing.goalDifference)}</strong></article></div>` : ""}${next ? `<p class="participant-next-match">下一场：${e(next.stage === "group" ? `${next.groupId} 组 · 第 ${next.round || 1} 轮` : `淘汰赛第 ${next.round} 轮`)} 对阵 ${e(next.teamAId === team.id ? next.teamBLabel : next.teamALabel)}</p>` : ""}<h3>我的赛程</h3><ul class="ticket-match-list">${matches.map(describe).join("") || "暂无比赛安排。"}</ul></section>`;
+}
+
+function participantHelp(state) {
+  const requests = state.helpRequests || []; const active = requests.find((request) => request.status !== "resolved"); const latestResolved = requests.find((request) => request.status === "resolved");
+  if (active) {
+    const status = active.status === "claimed" ? `${active.claimedByNickname || "TA"} 已接单，正在处理` : "已通知 Staff / TA，请留意现场呼叫";
+    return `<section class="participant-ticket participant-help-card"><h2>求助处理中</h2><strong>${e(helpCategory(active.category))}</strong><p>${e(status)}</p><span class="pill">${active.status === "claimed" ? "处理中" : "等待接单"}</span></section>`;
+  }
+  return `<section class="participant-ticket participant-help-card"><h2>需要现场协助？</h2><p>这里只记录问题类型，不要填写或口述 Code/PIN；TA 接单后会到现场确认。</p>${latestResolved ? `<p class="participant-help-resolved">最近一次求助已解决：${e(helpCategory(latestResolved.category))}</p>` : ""}<form id="participant-help" class="stack"><label>求助类型<select name="category"><option value="workshop_access">Workshop 进入或部署</option><option value="game_portal">Game Portal 连接或练习赛</option><option value="team">队伍与人员</option><option value="other">其他现场问题</option></select></label><button class="ticket-secondary">呼叫 TA</button></form></section>`;
 }
 
 function ticketFramePath(width, height) {
@@ -80,7 +90,7 @@ export function renderParticipant(root, state, api, refresh) {
   const schedule = competitionForTeam(team, state.tournament);
   const showQr = p && sessionStorage.getItem(QR_OPEN_KEY) === p.id;
   const personalQr = p && showQr ? `<div class="participant-qr-overlay"><section id="participant-qr" class="participant-ticket ticket-stamped participant-qr-ticket">${ticketFrame()}<div class="ticket-surface"><div class="qr-ticket-top"><span>我的二维码</span><button data-action="close-qr" type="button" class="ticket-close" aria-label="关闭二维码">×</button></div><div class="qr-ticket-body"><div class="qr-code-stage"><img src="/api/participant/qr?participant=${encodeURIComponent(p.staffShortId)}" width="196" height="196" alt="${e(p.staffShortId)} 的工作人员扫码二维码"></div><p>请让工作人员扫描。</p></div></div></section></div>` : "";
-  const profile = p ? `${team ? `<section class="participant-intro"><h1>${teamStatus(team)}</h1></section>` : ""}<section class="participant-ticket ticket-stamped participant-id-ticket">${ticketFrame()}<div class="ticket-surface"><div class="id-ticket-icon" aria-hidden="true">●</div><div><span class="ticket-label">你的现场编号</span><strong class="person-ticket-number">${e(p.staffShortId)}</strong><small>向 Staff 出示此编号。</small></div><button id="toggle-qr" type="button" class="ticket-qr-button">我的二维码</button></div></section>${teamInfo}${schedule}${personalQr}` : registration;
+  const profile = p ? `${team ? `<section class="participant-intro"><h1>${teamStatus(team)}</h1></section>` : ""}<section class="participant-ticket ticket-stamped participant-id-ticket">${ticketFrame()}<div class="ticket-surface"><div class="id-ticket-icon" aria-hidden="true">●</div><div><span class="ticket-label">你的现场编号</span><strong class="person-ticket-number">${e(p.staffShortId)}</strong><small>向 Staff 出示此编号。</small></div><button id="toggle-qr" type="button" class="ticket-qr-button">我的二维码</button></div></section>${teamInfo}${schedule}${participantHelp(state)}${personalQr}` : registration;
   root.innerHTML = `<div class="mobile-shell participant-experience"><header class="topbar participant-topbar"><a class="participant-brand" href="/" aria-label="Agentic Football 参与者首页"><span aria-hidden="true">⚽</span><strong>Agentic Football</strong><em>北京 MeetUp</em></a><span class="top-actions participant-top-actions"><button type="button" class="text-button" data-feedback>反馈</button><a href="/staff">Staff</a></span></header><p class="notice participant-notice" aria-live="polite"></p><main class="participant-content">${profile}</main></div>`;
   syncTicketFrames(root);
   const notice = root.querySelector(".notice"); const submit = (selector, handler) => root.querySelector(selector)?.addEventListener("submit", async (event) => { event.preventDefault(); const button = event.target.querySelector("button"); button.disabled = true; try { await handler(new FormData(event.target)); await refresh(); } catch (error) { notice.textContent = error.message; } finally { button.disabled = false; } });
@@ -93,4 +103,5 @@ export function renderParticipant(root, state, api, refresh) {
   root.querySelector(".ticket-details")?.addEventListener("toggle", (event) => { sessionStorage.setItem(REBIND_OPEN_KEY, String(event.currentTarget.open)); });
   submit("#register", (form) => api.register({ nickname: form.get("nickname"), supportProfile: { techBackground: form.get("techBackground"), workshopExperience: form.get("workshopExperience") } }));
   submit("#rebind", (form) => api.rebind({ nickname: form.get("nickname") }));
+  submit("#participant-help", (form) => api.createHelpRequest(form.get("category")));
 }
