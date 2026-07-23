@@ -5,7 +5,7 @@
 - Goal：active
 - 分支：`codex/workbench-reliability-hardening`
 - 基线：`main@f2847aa`
-- 当前步骤：离线运营包与现场 runbook
+- 当前步骤：完整验证与本地审查
 
 ## 提交与验证记录
 
@@ -15,7 +15,7 @@
 | 02 Code 访问边界 | completed | 本 issue 原子提交 | Node 16/16；lint；Playwright 1/1 |
 | 03 求助闭环与资格边界 | completed | 本 issue 原子提交 | Node 17/17；lint；Playwright 1/1 |
 | 04 release acceptance 环境 | completed | 本 issue 原子提交 | 连续 2 次：24/32 队均 passed；lint |
-| 05 runbook 与离线兜底 | pending | - | - |
+| 05 runbook 与离线兜底 | completed | 本 issue 原子提交 | Lightsail/offline 3/3；lint；diff check |
 | 06 最终验证与审查 | pending | - | - |
 
 ## 工作树保护
@@ -33,3 +33,4 @@
 - 2026-07-24：Code 访问矩阵完成；匿名/公共/diagnostics canary 不泄漏，Staff 与本队 participant 的正常路径通过。
 - 2026-07-24：求助状态机和 qualification 边界完成；求助不持久化自由文本，跨参与者不可见。
 - 2026-07-24：隔离 release acceptance 完成；每个场景使用独立临时 SQLite 和随机端口，CI 已加入 gate。
+- 2026-07-24：脱敏离线包与发布/事件运行手册完成；未触碰 feedback/live 或真实数据。
