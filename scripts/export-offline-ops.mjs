@@ -26,8 +26,18 @@ function matchView(state, match) {
 }
 
 function buildPackage(state, version) {
-  const activeTeams = state.teams.filter((team) => team.status !== "dissolved"); const tournament = state.tournament;
-  const frozenSnapshots = state.competition?.frozenTeams || [];
+  const safeState = {
+    ...state,
+    participants: Array.isArray(state.participants) ? state.participants : [],
+    teams: Array.isArray(state.teams) ? state.teams : [],
+    workshopCodes: Array.isArray(state.workshopCodes) ? state.workshopCodes : [],
+    gamePortalCodes: Array.isArray(state.gamePortalCodes) ? state.gamePortalCodes : [],
+  };
+  const activeTeams = safeState.teams.filter((team) => team.status !== "dissolved"); const tournament = safeState.tournament;
+  const frozenIds = [...new Set([...(safeState.competition?.frozenTeamIds || []), ...(tournament?.frozenTeamIds || [])])];
+  const frozenSnapshots = Array.isArray(safeState.competition?.frozenTeams) && safeState.competition.frozenTeams.length
+    ? safeState.competition.frozenTeams
+    : frozenIds.map((teamId) => ({ teamId, memberIds: safeState.teams.find((team) => team.id === teamId)?.memberIds || [] }));
   const knockout = tournament?.knockoutMatches || []; const finalRound = knockout.length ? Math.max(...knockout.map((match) => match.round)) : null; const final = finalRound ? knockout.find((match) => match.round === finalRound) : null;
   return {
     schemaVersion: 1,
@@ -35,11 +45,11 @@ function buildPackage(state, version) {
     sourceVersion: version,
     purpose: "offline-onsite-operations",
     redacted: true,
-    event: { id: state.event.id, name: state.event.name },
-    counts: { participants: state.participants.length, activeTeams: activeTeams.length, qualifiedTeams: activeTeams.filter((team) => team.qualificationStatus === "ta_qualified").length, workshopResources: { total: state.workshopCodes.length, assigned: state.workshopCodes.filter((item) => item.status === "assigned").length }, gamePortalResources: { total: state.gamePortalCodes.length, assigned: state.gamePortalCodes.filter((item) => item.status === "assigned").length } },
-    teams: activeTeams.map((team) => ({ teamNumber: team.teamNumber, status: team.status, qualificationStatus: team.qualificationStatus || "not_qualified", members: team.memberIds.map((memberId) => memberView(state, memberId)) })),
-    frozenRoster: frozenSnapshots.map((snapshot) => ({ teamNumber: teamNumber(state, snapshot.teamId), members: (snapshot.memberIds || []).map((memberId) => memberView(state, memberId)) })),
-    tournament: tournament ? { status: tournament.status, groups: tournament.groups.map((group) => ({ group: group.id, teams: group.teamIds.map((teamId) => teamNumber(state, teamId)), standings: standings(state, tournament, group) })), matches: [...(tournament.matches || []), ...knockout].map((match) => matchView(state, match)), championTeamNumber: final?.winnerId ? teamNumber(state, final.winnerId) : null } : null,
+    event: { id: safeState.event.id, name: safeState.event.name },
+    counts: { participants: safeState.participants.length, activeTeams: activeTeams.length, qualifiedTeams: activeTeams.filter((team) => team.qualificationStatus === "ta_qualified").length, workshopResources: { total: safeState.workshopCodes.length, assigned: safeState.workshopCodes.filter((item) => item.status === "assigned").length }, gamePortalResources: { total: safeState.gamePortalCodes.length, assigned: safeState.gamePortalCodes.filter((item) => item.status === "assigned").length } },
+    teams: activeTeams.map((team) => ({ teamNumber: team.teamNumber, status: team.status, qualificationStatus: team.qualificationStatus || "not_qualified", members: (team.memberIds || []).map((memberId) => memberView(safeState, memberId)) })),
+    frozenRoster: frozenSnapshots.map((snapshot) => ({ teamNumber: teamNumber(safeState, snapshot.teamId), members: (snapshot.memberIds || []).map((memberId) => memberView(safeState, memberId)) })),
+    tournament: tournament ? { status: tournament.status, groups: tournament.groups.map((group) => ({ group: group.id, teams: group.teamIds.map((teamId) => teamNumber(safeState, teamId)), standings: standings(safeState, tournament, group) })), matches: [...(tournament.matches || []), ...knockout].map((match) => matchView(safeState, match)), championTeamNumber: final?.winnerId ? teamNumber(safeState, final.winnerId) : null } : null,
   };
 }
 
@@ -66,12 +76,12 @@ async function main() {
   if (!argument("--db") || !argument("--output-dir")) throw new Error("必须显式提供 --db 和 --output-dir");
   await access(databasePath);
   await access(dirname(outputDirectory));
-  await mkdir(outputDirectory);
   const database = new DatabaseSync(databasePath, { readOnly: true });
   let row;
   try { row = database.prepare("SELECT data, version FROM event_state WHERE id = ?").get("beijing-meetup-2026"); } finally { database.close(); }
   if (!row) throw new Error("数据库中没有 Agentic Football 活动状态");
   const bundle = buildPackage(JSON.parse(row.data), Number(row.version)); assertRedacted(bundle);
+  await mkdir(outputDirectory);
   const jsonPath = join(outputDirectory, "offline-ops.json"); const htmlPath = join(outputDirectory, "index.html");
   await Promise.all([writeFile(jsonPath, `${JSON.stringify(bundle, null, 2)}\n`, { encoding: "utf8", flag: "wx" }), writeFile(htmlPath, html(bundle), { encoding: "utf8", flag: "wx" })]);
   console.log(JSON.stringify({ result: "written", redacted: true, files: [jsonPath, htmlPath] }));

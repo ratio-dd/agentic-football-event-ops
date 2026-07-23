@@ -185,8 +185,13 @@ async function createHelpRequest(s: State, request: Request) {
   if (!allowed.includes(category)) return fail("请选择求助类型", 400);
   if (text(b.note || b.details, 20)) return fail("求助请求只记录问题类型，请不要填写 Code、PIN 或其他自由文本", 400);
   if (s.helpRequests.some((item: any) => item.participantId === participant.id && item.status !== "resolved")) return fail("你已有待处理的求助请求", 409);
+  if (s.helpRequests.length >= 500) {
+    const oldestResolved = s.helpRequests.findIndex((item: any) => item.status === "resolved");
+    if (oldestResolved < 0) return fail("现场求助队列已满，请直接联系工作人员", 503);
+    s.helpRequests.splice(oldestResolved, 1);
+  }
   const entry = { id: id(), participantId: participant.id, teamId: participant.teamId || null, category, status: "open", createdAt: now(), claimedAt: null, claimedById: null, claimedByNickname: null, resolvedAt: null, resolvedById: null, resolvedByNickname: null };
-  s.helpRequests.push(entry); if (s.helpRequests.length > 500) { const oldestResolved = s.helpRequests.findIndex((item: any) => item.status === "resolved"); if (oldestResolved >= 0) s.helpRequests.splice(oldestResolved, 1); }
+  s.helpRequests.push(entry);
   audit(s, { id: participant.id, nickname: participant.nickname }, "help_request.created", "helpRequest", entry.id, category);
   return { helpRequest: helpRequestView(s, entry) };
 }

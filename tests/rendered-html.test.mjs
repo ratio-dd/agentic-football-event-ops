@@ -563,4 +563,17 @@ test("participant help requests follow an isolated open-claimed-resolved lifecyc
   const nextRequest = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
   assert.equal(nextRequest.response.status, 200); assert.equal(nextRequest.data.helpRequest.status, "open");
   assert.equal(JSON.stringify(JSON.parse(db.row.data)).includes("CANARY-SECRET-CODE"), false);
+
+  const fullQueueState = JSON.parse(db.row.data);
+  fullQueueState.helpRequests = Array.from({ length: 500 }, (_, index) => ({ id: `queue-${index}`, participantId: `waiting-${index}`, teamId: null, category: "other", status: "open", createdAt: new Date(index).toISOString() }));
+  db.row.data = JSON.stringify(fullQueueState);
+  const beforeFullQueueRequest = db.row.data;
+  const fullQueueRejected = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-two", body: { category: "team" } });
+  assert.equal(fullQueueRejected.response.status, 503); assert.match(fullQueueRejected.data.error, /队列已满/); assert.equal(db.row.data, beforeFullQueueRequest);
+
+  fullQueueState.helpRequests[0].status = "resolved"; db.row.data = JSON.stringify(fullQueueState);
+  const recycled = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-two", body: { category: "team" } });
+  assert.equal(recycled.response.status, 200);
+  const recycledState = JSON.parse(db.row.data);
+  assert.equal(recycledState.helpRequests.length, 500); assert.equal(recycledState.helpRequests.some((request) => request.id === "queue-0"), false);
 });

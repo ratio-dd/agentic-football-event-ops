@@ -47,5 +47,14 @@ test("offline operations export is a non-overwriting field whitelist", async () 
 
     const refusedOverwrite = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", outputDirectory], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
     assert.notEqual(refusedOverwrite.status, 0);
+
+    const legacyDb = new SqliteD1(databasePath); const legacyRow = await legacyDb.prepare("SELECT data, version FROM event_state WHERE id = ?").bind("beijing-meetup-2026").first();
+    const legacyState = JSON.parse(legacyRow.data); delete legacyState.workshopCodes; delete legacyState.gamePortalCodes; delete legacyState.competition.frozenTeams;
+    await legacyDb.prepare("UPDATE event_state SET data = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?").bind(JSON.stringify(legacyState), legacyRow.version + 1, new Date().toISOString(), "beijing-meetup-2026", legacyRow.version).run(); legacyDb.close();
+    const legacyOutputDirectory = join(temporary, "legacy-bundle");
+    const legacyExported = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", legacyOutputDirectory], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
+    assert.equal(legacyExported.status, 0, legacyExported.stderr);
+    const legacyBundle = JSON.parse(await readFile(join(legacyOutputDirectory, "offline-ops.json"), "utf8"));
+    assert.equal(legacyBundle.counts.workshopResources.total, 0); assert.equal(legacyBundle.counts.gamePortalResources.total, 0); assert.equal(legacyBundle.frozenRoster.length, 2);
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });

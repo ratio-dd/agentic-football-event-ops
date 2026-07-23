@@ -151,7 +151,8 @@ async function completeTournament({ teamCount, groupCount }, environment) {
   }
 
   const completed = (await api("/api/ops/state", { staff })).data.tournament;
-  const finalRound = Math.max(...completed.knockoutMatches.map((match) => match.round)); const final = completed.knockoutMatches.find((match) => match.round === finalRound);
+  const finalRound = Math.max(...completed.knockoutMatches.map((match) => match.round)); const finals = completed.knockoutMatches.filter((match) => match.round === finalRound);
+  assert.equal(finals.length, 1); const [final] = finals;
   assert.equal(final.status, "completed"); assert.ok(final.winnerId); assert.equal([final.teamAId, final.teamBId].includes(final.winnerId), true);
   assert.equal(completed.knockoutMatches.every((match) => ["completed", "bye"].includes(match.status) && match.winnerId), true);
   for (const match of completed.knockoutMatches.filter((candidate) => candidate.sourceAId || candidate.sourceBId)) {
