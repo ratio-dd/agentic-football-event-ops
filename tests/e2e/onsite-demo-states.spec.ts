@@ -62,11 +62,26 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await page.screenshot({ path: testInfo.outputPath("participant-resource-links.png"), fullPage: true });
 });
 
-test("参与者求助由 Staff 接单并解决", async ({ page }) => {
+test("Admin 可按需开启参与者求助，关闭后隐藏入口但不遗失存量请求", async ({ page }) => {
   const stamp = Date.now(); const client = `e2e-help-${stamp}`; const nickname = `求助参与者${stamp}`; const staffNickname = `求助 TA ${stamp}`;
   await page.goto(`/?acceptanceClient=${client}`);
   await page.getByRole("textbox", { name: "昵称", exact: true }).fill(nickname);
   await page.getByRole("button", { name: /完成登记/ }).click();
+  await expect(page.getByRole("heading", { name: "需要现场协助？" })).toHaveCount(0);
+
+  await staffLogin(page, `${staffNickname} 开关`);
+  await page.getByRole("button", { name: "更多", exact: true }).click();
+  await page.getByLabel("Admin PIN").fill("meetup-admin");
+  await page.getByRole("button", { name: "进入管理后台" }).click();
+  const helpToggle = page.locator('input[name="participantHelp"]');
+  await expect(helpToggle).not.toBeChecked();
+  await helpToggle.check();
+  await page.getByRole("button", { name: "保存活动设置" }).click();
+  await expect(page.getByText("活动设置已保存。")).toBeVisible();
+
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto(`/?acceptanceClient=${client}`);
+  await expect(page.getByRole("heading", { name: "需要现场协助？" })).toBeVisible();
   await page.getByLabel("求助类型").selectOption("game_portal");
   await page.getByRole("button", { name: "呼叫 TA" }).click();
   await expect(page.getByRole("heading", { name: "求助处理中" })).toBeVisible();
@@ -81,10 +96,17 @@ test("参与者求助由 Staff 接单并解决", async ({ page }) => {
   await page.locator("[data-help-request-id]", { hasText: nickname }).getByRole("button", { name: "标记已解决" }).click();
   await expect(page.locator("[data-help-request-id]", { hasText: nickname })).toHaveCount(0);
 
+  await page.getByRole("button", { name: "更多", exact: true }).click();
+  await page.getByLabel("Admin PIN").fill("meetup-admin");
+  await page.getByRole("button", { name: "进入管理后台" }).click();
+  await page.locator('input[name="participantHelp"]').uncheck();
+  await page.getByRole("button", { name: "保存活动设置" }).click();
+  await expect(page.getByText("活动设置已保存。")).toBeVisible();
+
   await page.evaluate(() => sessionStorage.clear());
   await page.goto(`/?acceptanceClient=${client}`);
-  await expect(page.getByText("最近一次求助已解决：Game Portal 连接或练习赛")).toBeVisible();
-  await expect(page.getByRole("button", { name: "呼叫 TA" })).toBeVisible();
+  await expect(page.getByText("最近一次求助已解决：Game Portal 连接或练习赛")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "呼叫 TA" })).toHaveCount(0);
 });
 
 test("Admin 冻结并生成赛程，Staff 录入赛果，参与者看到自己的积分和赛程", async ({ page, request }) => {

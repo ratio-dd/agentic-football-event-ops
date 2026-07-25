@@ -100,7 +100,7 @@ async function mutation(env: Env, request: Request, action: (s: State) => any): 
   return json({ error: "现场数据刚刚发生变化，请重试" }, 409);
 }
 
-function defaultGates() { return { selfServiceTeam: false, codeIssuance: true, qualification: true, scheduleEditing: true, publicMaintenanceSnapshot: false }; }
+function defaultGates() { return { selfServiceTeam: false, participantHelp: false, codeIssuance: true, qualification: true, scheduleEditing: true, publicMaintenanceSnapshot: false }; }
 const DEMO_WORKSHOP_URL = "https://example.com/agentic-football-workshop";
 const GAME_PORTAL_URL = "https://agentic-football.aws.dev/";
 function initialState() { return { event: { id: EVENT_ID, name: "Agentic Football 现场运营台", maxWorkshopTeams: 32, workshopUrl: DEMO_WORKSHOP_URL, gamePortalUrl: GAME_PORTAL_URL, gates: defaultGates(), publicMaintenanceSnapshotEnabledAt: null }, participants: [], teams: [], allocationRuns: [], manualSplitAudits: [], workshopCodes: [], gamePortalCodes: [], competition: { frozenTeamIds: [], frozenAt: null, frozenBy: null }, staffAccounts: [], staffSessions: [], adminSessions: [], tournament: null, auditLog: [], feedback: [], helpRequests: [] }; }
@@ -181,6 +181,7 @@ function sortedHelpRequests(s: State) {
 }
 async function createHelpRequest(s: State, request: Request) {
   const participant = participantForClient(s, request); if (!participant) return fail("请先完成现场登记", 403);
+  if (s.event.gates.participantHelp !== true) return fail("页面求助功能未开启，请直接向现场工作人员举手求助", 409);
   const b = await body(request); const category = text(b.category, 40); const allowed = ["workshop_access", "game_portal", "team", "other"];
   if (!allowed.includes(category)) return fail("请选择求助类型", 400);
   if (text(b.note || b.details, 20)) return fail("求助请求只记录问题类型，请不要填写 Code、PIN 或其他自由文本", 400);

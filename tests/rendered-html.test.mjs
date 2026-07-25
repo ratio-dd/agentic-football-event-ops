@@ -117,6 +117,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(await read("public/admin-panel.js"), /只读核对当前资源/);
   assert.match(await read("public/admin-panel.js"), /拖到满组的一支队伍卡可交换/);
   assert.match(await read("public/admin-panel.js"), /重新生成下一轮/);
+  assert.match(await read("public/admin-panel.js"), /允许参与者在页面呼叫 TA/);
   assert.match(await read("worker/index.ts"), /\/api\/admin\/diagnostics/);
   assert.match(await read("worker/index.ts"), /\/api\/maintenance\/snapshot/);
   assert.match(await read("worker/index.ts"), /\/api\/participant\/help-requests/);
@@ -138,6 +139,7 @@ test("shared deployment fails closed without configured Staff and administrator 
   const admin = await elevate(worker, db, login.data.staffSession);
   const updated = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff: login.data.staffSession, admin, body: { gates: { codeIssuance: true, qualification: true, scheduleEditing: true } } });
   assert.equal(updated.response.status, 200);
+  assert.equal(updated.data.gates.participantHelp, false);
   const hiddenEndpoint = await call(worker, db, "/api/teams/self", { method: "POST", client: "gate-phone", body: {} });
   assert.equal(hiddenEndpoint.response.status, 409);
   assert.equal(registered.response.status, 200);
@@ -534,6 +536,11 @@ test("participant help requests follow an isolated open-claimed-resolved lifecyc
   const worker = await eventWorker(); const db = new MemoryD1();
   await call(worker, db, "/api/participants", { method: "POST", client: "help-one", body: { nickname: "求助甲", supportProfile: {} } });
   await call(worker, db, "/api/participants", { method: "POST", client: "help-two", body: { nickname: "求助乙", supportProfile: {} } });
+  const defaultDenied = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "workshop_access" } });
+  assert.equal(defaultDenied.response.status, 409); assert.match(defaultDenied.data.error, /功能未开启/);
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "求助 TA" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const enabled = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { participantHelp: true, codeIssuance: true, qualification: true, scheduleEditing: true } } });
+  assert.equal(enabled.data.gates.participantHelp, true);
   const unregistered = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-unknown", body: { category: "workshop_access" } });
   assert.equal(unregistered.response.status, 403);
   const freeTextRejected = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "workshop_access", note: "CANARY-SECRET-CODE" } });
@@ -542,10 +549,11 @@ test("participant help requests follow an isolated open-claimed-resolved lifecyc
   assert.equal(created.response.status, 200); assert.equal(created.data.helpRequest.status, "open");
   const duplicate = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
   assert.equal(duplicate.response.status, 409);
+  const disabled = await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { participantHelp: false, codeIssuance: true, qualification: true, scheduleEditing: true } } });
+  assert.equal(disabled.data.gates.participantHelp, false);
   const otherView = await call(worker, db, "/api/state", { client: "help-two" });
   assert.deepEqual(otherView.data.helpRequests, []);
 
-  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "求助 TA" } }); const staff = login.data.staffSession;
   const staffState = await call(worker, db, "/api/ops/state", { staff });
   assert.equal(staffState.data.helpRequests.length, 1); assert.equal(staffState.data.helpRequests[0].participantNickname, "求助甲");
   const resolveBeforeClaim = await call(worker, db, `/api/ops/help-requests/${created.data.helpRequest.id}/resolve`, { method: "POST", staff, body: {} });
@@ -560,6 +568,9 @@ test("participant help requests follow an isolated open-claimed-resolved lifecyc
   assert.equal(resolved.response.status, 200); assert.equal(resolved.data.helpRequest.status, "resolved");
   const participantResolved = await call(worker, db, "/api/state", { client: "help-one" });
   assert.equal(participantResolved.data.helpRequests[0].status, "resolved");
+  const disabledNewRequest = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
+  assert.equal(disabledNewRequest.response.status, 409);
+  await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { participantHelp: true, codeIssuance: true, qualification: true, scheduleEditing: true } } });
   const nextRequest = await call(worker, db, "/api/participant/help-requests", { method: "POST", client: "help-one", body: { category: "game_portal" } });
   assert.equal(nextRequest.response.status, 200); assert.equal(nextRequest.data.helpRequest.status, "open");
   assert.equal(JSON.stringify(JSON.parse(db.row.data)).includes("CANARY-SECRET-CODE"), false);

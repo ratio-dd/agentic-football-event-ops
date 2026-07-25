@@ -26,7 +26,8 @@ function competitionForTeam(team, tournament) {
 }
 
 function participantHelp(state) {
-  const requests = state.helpRequests || []; const active = requests.find((request) => request.status !== "resolved"); const latestResolved = requests.find((request) => request.status === "resolved");
+  const requests = state.helpRequests || []; const active = requests.find((request) => request.status !== "resolved"); const latestResolved = requests.find((request) => request.status === "resolved"); const enabled = state.event?.gates?.participantHelp === true;
+  if (!enabled && !active) return "";
   if (active) {
     const status = active.status === "claimed" ? `${active.claimedByNickname || "TA"} 已接单，正在处理` : "已通知 Staff / TA，请留意现场呼叫";
     return `<section class="participant-ticket participant-help-card"><h2>求助处理中</h2><strong>${e(helpCategory(active.category))}</strong><p>${e(status)}</p><span class="pill">${active.status === "claimed" ? "处理中" : "等待接单"}</span></section>`;
