@@ -1,51 +1,27 @@
 {
-  "name": "site-creator-vinext-starter",
+  "name": "football-workbench",
   "version": "0.1.0",
   "private": true,
-  "engines": {
-    "node": ">=22.13.0"
-  },
+  "engines": { "node": ">=24" },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
-    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs && npm run test:lightsail && npm run test:e2e",
+    "dev": "npm run lightsail:start",
+    "build": "npm run lightsail:build",
+    "start": "node lightsail/server.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/independent-allocation-acceptance.test.mjs && npm run test:lightsail && npm run test:e2e",
     "test:e2e": "playwright test",
     "acceptance:serve": "node scripts/acceptance-demo.mjs",
     "acceptance:release": "node scripts/release-acceptance.mjs",
     "ops:export-offline": "node scripts/export-offline-ops.mjs",
-    "test:lightsail": "npm run lightsail:build && node --test tests/lightsail-adapter.test.mjs tests/offline-export.test.mjs",
+    "test:lightsail": "npm run lightsail:build && node --test tests/lightsail-adapter.test.mjs tests/offline-export.test.mjs tests/tenant-http-isolation.test.mjs",
     "lightsail:build": "node lightsail/build-worker.mjs",
     "lightsail:start": "npm run lightsail:build && node lightsail/server.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "lint": "eslint scripts lightsail tests --ext .js,.mjs"
   },
-  "dependencies": {
-    "drizzle-orm": "0.45.2",
-    "next": "16.2.6",
-    "qrcode": "^1.5.4",
-    "react": "19.2.6",
-    "react-dom": "19.2.6",
-    "react-loading-skeleton": "3.5.0"
-  },
+  "dependencies": { "qrcode": "^1.5.4" },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
     "@playwright/test": "^1.61.1",
-    "@tailwindcss/postcss": "4.2.1",
-    "@types/node": "22.19.19",
-    "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
-    "react-server-dom-webpack": "19.2.6",
-    "tailwindcss": "4.2.1",
-    "typescript": "5.9.3",
-    "vinext": "0.0.50",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "esbuild": "^0.27.0"
   },
   "type": "module"
 }

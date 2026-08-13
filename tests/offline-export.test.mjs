@@ -8,7 +8,7 @@ import { makeAssets } from "../lightsail/assets.mjs";
 import { SqliteD1 } from "../lightsail/sqlite-d1.mjs";
 
 const root = new URL("../", import.meta.url);
-const environment = { STAFF_PINS: JSON.stringify([{ id: "offline-staff", pin: "OFFLINE-STAFF-PIN", enabled: true }]), ADMIN_PIN: "OFFLINE-ADMIN-PIN" };
+const environment = { EVENT_CONFIG: await readFile(new URL("../config/events/afc-beijing-2026.json", import.meta.url), "utf8"), STAFF_PINS: JSON.stringify([{ id: "offline-staff", pin: "OFFLINE-STAFF-PIN", enabled: true }]), ADMIN_PIN: "OFFLINE-ADMIN-PIN" };
 
 async function worker() { const url = new URL("../lightsail/runtime/worker.mjs", import.meta.url); url.searchParams.set("test", `${Date.now()}-${Math.random()}`); return (await import(url.href)).default; }
 async function call(eventWorker, db, path, { method = "GET", client = "", staff = "", admin = "", body } = {}) {
@@ -37,7 +37,7 @@ test("offline operations export is a non-overwriting field whitelist", async () 
     await call(eventWorker, db, `/api/ops/matches/${generated.tournament.matches[0].id}/result`, { method: "POST", staff: login.staffSession, body: { scoreA: 2, scoreB: 1 } });
     db.close();
 
-    const exported = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", outputDirectory], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
+    const exported = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", outputDirectory, "--tenant-id", "beijing-meetup-2026"], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
     assert.equal(exported.status, 0, exported.stderr);
     const bundle = JSON.parse(await readFile(join(outputDirectory, "offline-ops.json"), "utf8")); const rendered = await readFile(join(outputDirectory, "index.html"), "utf8");
     assert.equal(bundle.redacted, true); assert.equal(bundle.teams.length, 2); assert.equal(bundle.frozenRoster.length, 2); assert.equal(bundle.tournament.matches[0].scoreA, 2); assert.equal(bundle.tournament.matches[0].scoreB, 1);
@@ -45,14 +45,14 @@ test("offline operations export is a non-overwriting field whitelist", async () 
     const forbiddenKeys = keys(bundle).filter((key) => /(code|pin|session|client|token|feedback|audit|note)/i.test(key)); assert.deepEqual(forbiddenKeys, []);
     for (const secret of secrets) { assert.equal(JSON.stringify(bundle).includes(secret), false); assert.equal(rendered.includes(secret), false); }
 
-    const refusedOverwrite = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", outputDirectory], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
+    const refusedOverwrite = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", outputDirectory, "--tenant-id", "beijing-meetup-2026"], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
     assert.notEqual(refusedOverwrite.status, 0);
 
     const legacyDb = new SqliteD1(databasePath); const legacyRow = await legacyDb.prepare("SELECT data, version FROM event_state WHERE id = ?").bind("beijing-meetup-2026").first();
     const legacyState = JSON.parse(legacyRow.data); delete legacyState.workshopCodes; delete legacyState.gamePortalCodes; delete legacyState.competition.frozenTeams;
     await legacyDb.prepare("UPDATE event_state SET data = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?").bind(JSON.stringify(legacyState), legacyRow.version + 1, new Date().toISOString(), "beijing-meetup-2026", legacyRow.version).run(); legacyDb.close();
     const legacyOutputDirectory = join(temporary, "legacy-bundle");
-    const legacyExported = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", legacyOutputDirectory], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
+    const legacyExported = spawnSync(process.execPath, ["scripts/export-offline-ops.mjs", "--db", databasePath, "--output-dir", legacyOutputDirectory, "--tenant-id", "beijing-meetup-2026"], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
     assert.equal(legacyExported.status, 0, legacyExported.stderr);
     const legacyBundle = JSON.parse(await readFile(join(legacyOutputDirectory, "offline-ops.json"), "utf8"));
     assert.equal(legacyBundle.counts.workshopResources.total, 0); assert.equal(legacyBundle.counts.gamePortalResources.total, 0); assert.equal(legacyBundle.frozenRoster.length, 2);

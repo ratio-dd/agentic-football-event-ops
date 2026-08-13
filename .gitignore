@@ -44,6 +44,8 @@ next-env.d.ts
 /outputs/
 /output/
 /work/
+/.local-data/
+/.playwright-cli/
 *.tsbuildinfo
 /lightsail/runtime/
 /lightsail/.aws/

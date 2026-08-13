@@ -152,7 +152,7 @@ test("Staff creates a new team with one final confirmation and immediate pending
 
 test("public display is readable without Staff controls", async ({ page }) => {
   await page.goto("/display");
-  await expect(page).toHaveTitle("Agentic Football 现场大屏");
+  await expect(page).toHaveTitle("Agentic Football 北京 MeetUp · 现场大屏");
   await expect(page.locator("#display-app")).toContainText(/agentic football/i);
   await expect(page.getByText("工作台 PIN")).toHaveCount(0);
 });

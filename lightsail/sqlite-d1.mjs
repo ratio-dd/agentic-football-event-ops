@@ -40,6 +40,10 @@ class SqliteStatement {
     return this.statement.get(...this.values) ?? null;
   }
 
+  async all() {
+    return this.statement.all(...this.values);
+  }
+
   async run() {
     const result = this.statement.run(...this.values);
     return { meta: { changes: Number(result.changes ?? 0) } };

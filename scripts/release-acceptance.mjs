@@ -58,7 +58,7 @@ async function isolatedServer(teamCount, action) {
   const databasePath = join(directory, "event.db"); const port = await availablePort(); const acceptanceRunId = randomUUID();
   const child = spawn(process.execPath, ["lightsail/server.mjs"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), EVENT_DB_PATH: databasePath, STAFF_PINS: staffPins, ADMIN_PIN: adminPin, ACCEPTANCE_RUN_ID: acceptanceRunId },
+    env: { ...process.env, PORT: String(port), EVENT_DB_PATH: databasePath, TENANT_STAFF_PINS: JSON.stringify({ "beijing-meetup-2026": JSON.parse(staffPins) }), TENANT_ADMIN_PINS: JSON.stringify({ "beijing-meetup-2026": adminPin }), ACCEPTANCE_RUN_ID: acceptanceRunId },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = ""; let stderr = "";

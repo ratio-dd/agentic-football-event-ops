@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "tenants": [
+    {
+      "eventConfig": "events/afc-beijing-2026.json",
+      "hosts": [
+        "afc.awscommunity.cn",
+        "beijing.localhost",
+        "localhost",
+        "127.0.0.1",
+        "::1"
+      ]
+    },
+    {
+      "eventConfig": "events/afc-city.example.json",
+      "hosts": [
+        "shanghai.localhost"
+      ]
+    }
+  ]
+}

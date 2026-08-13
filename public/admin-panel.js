@@ -1,5 +1,6 @@
 const e = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 const members = (team) => `${e(team.teamNumber)} · ${team.members.map((member) => `${e(member.nickname)} · ${e(member.staffShortId)}`).join("、")}`;
+const tournamentPolicy = (state) => state.event?.tournamentPolicy || { maxTeamsPerGroup: 4, maxGroups: 8, defaultQualifiersPerGroup: 2, maxQualifiersPerGroup: 2 };
 
 export function renderAdmin(root, state, api, controls) {
   if (!controls.hasAdmin) {
@@ -30,7 +31,7 @@ export function renderAdmin(root, state, api, controls) {
     if (button.dataset.action === "group-reset") { resetGroupDraft(ui, state.tournament); return renderAdmin(root, state, api, controls); }
     if (button.dataset.groupTeam) { ui.groupSelectedTeamId = ui.groupSelectedTeamId === button.dataset.groupTeam ? "" : button.dataset.groupTeam; ui.groupBoardError = ""; return renderAdmin(root, state, api, controls); }
     if (button.dataset.groupMoveTarget) {
-      const moved = moveTeamInDraft(ui, button.dataset.groupMoveTarget, ui.groupSelectedTeamId);
+      const moved = moveTeamInDraft(ui, button.dataset.groupMoveTarget, ui.groupSelectedTeamId, "", tournamentPolicy(state).maxTeamsPerGroup);
       if (!moved) return renderAdmin(root, state, api, controls);
       ui.groupSelectedTeamId = ""; return renderAdmin(root, state, api, controls);
     }
@@ -55,7 +56,7 @@ export function renderAdmin(root, state, api, controls) {
     const lane = event.target.closest("[data-group-drop]"); if (!lane) return;
     event.preventDefault(); const participant = event.dataTransfer?.getData("text/plain") || ui.groupDragTeamId || ui.groupSelectedTeamId;
     const targetCard = event.target.closest("[data-group-team]");
-    lane.classList.remove("is-drag-over"); if (!moveTeamInDraft(ui, lane.dataset.groupDrop, participant, targetCard?.dataset.groupTeam || "")) return renderAdmin(root, state, api, controls);
+    lane.classList.remove("is-drag-over"); if (!moveTeamInDraft(ui, lane.dataset.groupDrop, participant, targetCard?.dataset.groupTeam || "", tournamentPolicy(state).maxTeamsPerGroup)) return renderAdmin(root, state, api, controls);
     ui.groupSelectedTeamId = ""; ui.groupDragTeamId = ""; renderAdmin(root, state, api, controls);
   });
   root.querySelector("#admin-event-settings")?.addEventListener("submit", (event) => { event.preventDefault(); const form = new FormData(event.target); const gates = { selfServiceTeam: form.has("selfServiceTeam"), participantHelp: form.has("participantHelp"), codeIssuance: form.has("codeIssuance"), qualification: form.has("qualification"), scheduleEditing: form.has("scheduleEditing"), publicMaintenanceSnapshot: form.has("publicMaintenanceSnapshot") }; return action(async () => { await api.setEventLinks(form.get("workshopUrl"), form.get("gamePortalUrl")); await api.updateEventGates(gates); }, "活动设置已保存。", event.target.querySelector("button")); });
@@ -80,15 +81,15 @@ function resourcesPanel(state, ui) {
 }
 
 function competitionPanel(state, ui) {
-  const eligible = state.teams.filter((team) => team.qualificationStatus === "ta_qualified"); const frozen = state.competition?.frozenTeamIds || []; const tournament = state.tournament;
+  const eligible = state.teams.filter((team) => team.qualificationStatus === "ta_qualified"); const frozen = state.competition?.frozenTeamIds || []; const tournament = state.tournament; const policy = tournamentPolicy(state);
   const progress = ui.competitionNotice ? `<p class="admin-flow-notice" role="status">${e(ui.competitionNotice)}</p>` : "";
   if (!frozen.length && !tournament) return `<section class="admin-section">${progress}<div><h2>冻结参赛名单</h2><p>仅 TA 已确认的队伍可进入比赛。冻结后，可在这里生成小组赛。</p></div><form id="admin-freeze-roster" class="admin-form">${eligible.map((team) => `<label class="check-row"><input type="checkbox" name="teamId" value="${e(team.id)}" checked>${members(team)}</label>`).join("") || '<p class="hint">暂无已确认队伍。</p>'}<button ${eligible.length < 2 ? "disabled" : ""}>冻结名单</button></form>${qualificationExceptions(eligible)}</section>`;
   if (frozen.length && !tournament) {
-    const minimumGroups = Math.ceil(frozen.length / 4); const defaultGroups = Math.min(8, Math.ceil(frozen.length / 4));
-    return `<section class="admin-section">${progress}<div><h2>已冻结 ${frozen.length} 支队伍</h2><p>每组最多 4 队。32 队时固定为 8 组，每队踢 3 场，前 2 名晋级。</p></div><form id="admin-generate-groups" class="admin-form"><label>小组数量<input name="groupCount" type="number" min="${minimumGroups}" max="${Math.min(8, frozen.length)}" value="${defaultGroups}"></label><label>每组晋级<select name="qualifiersPerGroup"><option value="2">前 2 名</option><option value="1">前 1 名</option></select></label><button>生成分组草稿</button></form><button data-action="unfreeze" class="secondary">解除名单冻结</button>${qualificationExceptions(eligible)}</section>`;
+    const minimumGroups = Math.ceil(frozen.length / policy.maxTeamsPerGroup); const defaultGroups = Math.min(policy.maxGroups, Math.ceil(frozen.length / policy.maxTeamsPerGroup)); const qualifierOptions = Array.from({ length: policy.maxQualifiersPerGroup }, (_, index) => index + 1).reverse().map((count) => `<option value="${count}" ${count === policy.defaultQualifiersPerGroup ? "selected" : ""}>前 ${count} 名</option>`).join("");
+    return `<section class="admin-section">${progress}<div><h2>已冻结 ${frozen.length} 支队伍</h2><p>每组最多 ${policy.maxTeamsPerGroup} 队，最多 ${policy.maxGroups} 组；默认每组前 ${policy.defaultQualifiersPerGroup} 名晋级。</p></div><form id="admin-generate-groups" class="admin-form"><label>小组数量<input name="groupCount" type="number" min="${minimumGroups}" max="${Math.min(policy.maxGroups, frozen.length)}" value="${defaultGroups}"></label><label>每组晋级<select name="qualifiersPerGroup">${qualifierOptions}</select></label><button>生成分组草稿</button></form><button data-action="unfreeze" class="secondary">解除名单冻结</button>${qualificationExceptions(eligible)}</section>`;
   }
   const canEditGroups = tournament.status === "group" && !tournament.matches.some((match) => match.status === "completed");
-  const board = canEditGroups ? groupBoard(tournament, ui) : "";
+  const board = canEditGroups ? groupBoard(tournament, ui, policy.maxTeamsPerGroup) : "";
   const hasBrokenFutureRound = tournament.status === "knockout" && tournament.knockoutMatches?.some((match) => match.round > 1 && match.status === "bye" && match.teamAId && match.teamBId);
   const repair = hasBrokenFutureRound ? `<section class="admin-subsection"><h3>修复下一轮</h3><p>保留已完成的当前轮次赛果，按胜者重新生成后续淘汰赛。</p><button type="button" data-action="rebuild-knockout">重新生成下一轮</button></section>` : "";
   return `<section class="admin-section">${progress}<div><h2>${tournament.status === "knockout" ? "淘汰赛已生成" : "小组赛"}</h2><p>${canEditGroups ? "确认分组后，保存并开始由 Staff 录入赛果。" : "Staff 录入赛果；这里可生成淘汰赛或作废赛程。"}</p></div><div class="admin-competition-links"><a href="/staff">打开 Staff 赛果录入</a><a href="/display" target="_blank" rel="noreferrer">打开现场大屏</a></div>${board}${repair}${tournament.status === "group" && !tournament.knockoutMatches?.length ? `<form id="admin-generate-knockout" class="admin-form"><button ${tournament.matches.some((match) => match.status !== "completed") ? "disabled" : ""}>生成淘汰赛</button></form>` : ""}<button data-action="void-tournament" class="secondary">作废并重新分组</button>${qualificationExceptions(eligible)}</section>`;
@@ -102,11 +103,11 @@ function teamNumber(tournament, teamId) {
   const row = tournament.groups.flatMap((group) => group.standings || []).find((standing) => standing.teamId === teamId);
   return row?.label || "队伍";
 }
-function moveTeamInDraft(ui, targetGroupId, teamId, swapWithId = "") {
+function moveTeamInDraft(ui, targetGroupId, teamId, swapWithId = "", maximum = 4) {
   if (!teamId || !ui.groupDraft) return false;
   const source = ui.groupDraft.find((group) => group.teamIds.includes(teamId)); const target = ui.groupDraft.find((group) => group.id === targetGroupId);
   if (!source || !target || source.id === target.id) return false;
-  if (target.teamIds.length >= 4) {
+  if (target.teamIds.length >= maximum) {
     if (!swapWithId || !target.teamIds.includes(swapWithId) || swapWithId === teamId) { ui.groupBoardError = `${target.id} 组已满；请拖到该组的一支队伍卡上以交换。`; return false; }
     const sourceIndex = source.teamIds.indexOf(teamId); const targetIndex = target.teamIds.indexOf(swapWithId);
     source.teamIds[sourceIndex] = swapWithId; target.teamIds[targetIndex] = teamId; ui.groupBoardError = ""; return true;
@@ -114,11 +115,11 @@ function moveTeamInDraft(ui, targetGroupId, teamId, swapWithId = "") {
   if (source.teamIds.length <= 1) { ui.groupBoardError = `${source.id} 组至少保留 1 队。`; return false; }
   source.teamIds = source.teamIds.filter((id) => id !== teamId); target.teamIds = [...target.teamIds, teamId]; ui.groupBoardError = ""; return true;
 }
-function groupBoard(tournament, ui) {
+function groupBoard(tournament, ui, maximum = 4) {
   const draft = draftFor(ui, tournament); const changed = !sameGroups(draft, tournament.groups);
   const selected = ui.groupSelectedTeamId; const selectedLabel = selected ? teamNumber(tournament, selected) : "";
-  const lane = (group) => `<section class="group-board-lane" data-group-drop="${e(group.id)}"><header><strong>${e(group.id)} 组</strong><span>${group.teamIds.length} / 4</span></header><div class="group-board-cards">${group.teamIds.map((teamId) => `<button type="button" draggable="true" data-group-team="${e(teamId)}" class="group-team-card ${selected === teamId ? "selected" : ""}" aria-pressed="${selected === teamId}"><strong>${e(teamNumber(tournament, teamId))}</strong><small>拖动或点选</small></button>`).join("")}</div>${selected && !group.teamIds.includes(selected) && group.teamIds.length < 4 ? `<button type="button" class="group-board-move" data-group-move-target="${e(group.id)}">将 ${e(selectedLabel)} 移到此组</button>` : ""}</section>`;
-  return `<section class="group-board"><div class="group-board-heading"><div><h3>分组编排</h3><p>拖到空位可移动；拖到满组的一支队伍卡可交换。每组最多 4 队。</p></div><div class="group-board-actions"><span class="${changed ? "dirty" : ""}">${changed ? "未保存" : "已保存"}</span><button type="button" class="secondary" data-action="group-reset" ${changed ? "" : "disabled"}>恢复已保存分组</button><button type="button" data-action="group-save" ${changed ? "" : "disabled"}>保存分组并重排赛程</button></div></div>${ui.groupBoardError ? `<p class="group-board-error" role="status">${e(ui.groupBoardError)}</p>` : ""}<div class="group-board-scroll"><div class="group-board-lanes">${draft.map(lane).join("")}</div></div></section>`;
+  const lane = (group) => `<section class="group-board-lane" data-group-drop="${e(group.id)}"><header><strong>${e(group.id)} 组</strong><span>${group.teamIds.length} / ${maximum}</span></header><div class="group-board-cards">${group.teamIds.map((teamId) => `<button type="button" draggable="true" data-group-team="${e(teamId)}" class="group-team-card ${selected === teamId ? "selected" : ""}" aria-pressed="${selected === teamId}"><strong>${e(teamNumber(tournament, teamId))}</strong><small>拖动或点选</small></button>`).join("")}</div>${selected && !group.teamIds.includes(selected) && group.teamIds.length < maximum ? `<button type="button" class="group-board-move" data-group-move-target="${e(group.id)}">将 ${e(selectedLabel)} 移到此组</button>` : ""}</section>`;
+  return `<section class="group-board"><div class="group-board-heading"><div><h3>分组编排</h3><p>拖到空位可移动；拖到满组的一支队伍卡可交换。每组最多 ${maximum} 队。</p></div><div class="group-board-actions"><span class="${changed ? "dirty" : ""}">${changed ? "未保存" : "已保存"}</span><button type="button" class="secondary" data-action="group-reset" ${changed ? "" : "disabled"}>恢复已保存分组</button><button type="button" data-action="group-save" ${changed ? "" : "disabled"}>保存分组并重排赛程</button></div></div>${ui.groupBoardError ? `<p class="group-board-error" role="status">${e(ui.groupBoardError)}</p>` : ""}<div class="group-board-scroll"><div class="group-board-lanes">${draft.map(lane).join("")}</div></div></section>`;
 }
 
 function qualificationExceptions(teams) { return `<section class="admin-subsection"><h3>撤销参赛资格</h3><div class="admin-list">${teams.map((team) => `<article><div><strong>${members(team)}</strong><small>仅处理误确认或现场例外。</small></div><button data-action="revoke-qualification" data-team-id="${e(team.id)}" class="secondary">撤销</button></article>`).join("") || '<p class="hint">暂无可处理队伍。</p>'}</div></section>`; }

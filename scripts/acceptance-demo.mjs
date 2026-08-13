@@ -32,7 +32,7 @@ async function start() {
   const databaseDirectory = await mkdtemp(join(tmpdir(), `afc-acceptance-${scenario}-`));
   server = spawn(process.execPath, ["lightsail/server.mjs"], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), EVENT_DB_PATH: join(databaseDirectory, "event.db"), STAFF_PINS: staffPins, ADMIN_PIN: adminPin, ACCEPTANCE_RUN_ID: acceptanceRunId },
+    env: { ...process.env, PORT: String(port), EVENT_DB_PATH: join(databaseDirectory, "event.db"), TENANT_STAFF_PINS: JSON.stringify({ "beijing-meetup-2026": JSON.parse(staffPins) }), TENANT_ADMIN_PINS: JSON.stringify({ "beijing-meetup-2026": adminPin }), ACCEPTANCE_RUN_ID: acceptanceRunId },
     stdio: "inherit",
   });
   process.once("SIGINT", () => { void shutdown(); });

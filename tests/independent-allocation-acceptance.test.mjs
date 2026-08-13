@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 
 // This file is intentionally independent from the implementation test suite.
 // It exercises the built Worker through its HTTP surface and uses new data for
 // every scenario described in workshop-team-allocation-acceptance-v1.md.
-const ENV = { STAFF_PINS: JSON.stringify([{ id: "acceptance-staff", pin: "acceptance-staff", enabled: true }]), ADMIN_PIN: "acceptance-admin" };
+const EVENT_CONFIG = await readFile(new URL("../config/events/afc-beijing-2026.json", import.meta.url), "utf8");
+const ENV = { EVENT_CONFIG, STAFF_PINS: JSON.stringify([{ id: "acceptance-staff", pin: "acceptance-staff", enabled: true }]), ADMIN_PIN: "acceptance-admin" };
 
 class MemoryD1 {
   row = null;
@@ -23,7 +25,7 @@ class MemoryD1 {
 }
 
 async function worker() {
-  const url = new URL("../dist/server/index.js", import.meta.url);
+  const url = new URL("../lightsail/runtime/worker.mjs", import.meta.url);
   url.searchParams.set("acceptance", `${Date.now()}-${Math.random()}`);
   return (await import(url.href)).default;
 }

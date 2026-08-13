@@ -7,7 +7,8 @@ COPY lightsail/runtime-package.json ./package.json
 COPY lightsail/runtime-package-lock.json ./package-lock.json
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY public ./public
-COPY lightsail/assets.mjs lightsail/server.mjs lightsail/sqlite-d1.mjs ./lightsail/
+COPY config ./config
+COPY lightsail/assets.mjs lightsail/server.mjs lightsail/sqlite-d1.mjs lightsail/tenant-directory.mjs ./lightsail/
 COPY lightsail/runtime ./lightsail/runtime
 VOLUME ["/data"]
 EXPOSE 8787

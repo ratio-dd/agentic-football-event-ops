@@ -130,12 +130,13 @@ async function login(payload) { const result = await api.staffLogin(payload); co
 async function loginAdmin(adminPin) { const result = await api.adminLogin(adminPin); context.adminSession = result.adminSession; sessionStorage.setItem(ADMIN_KEY, result.adminSession); history.pushState({}, "", "/admin"); await refresh(); }
 function render() {
   if (!context.state) { app.innerHTML = `<main class="loading-screen"><p>${context.error || "正在加载 Agentic Football 现场运营台…"}</p></main>`; return; }
+  document.title = context.state.event?.branding?.pageTitle || context.state.event?.name || "现场运营台";
   const focus = captureInputFocus();
   const surface = document.createElement("main"); surface.className = "app-surface"; app.replaceChildren(surface);
   const rerender = async () => refresh();
   const logout = () => { sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = ""; history.pushState({}, "", "/"); refresh(); };
   if (location.pathname === "/admin") renderAdmin(surface, context.state, api, { refresh: rerender, ui: context.adminUi, hasAdmin: Boolean(context.adminSession), returnToStaff: () => { history.pushState({}, "", "/staff"); refresh(); } });
-  else if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), isAdmin: Boolean(context.adminSession), logout });
+  else if (["/staff", "/ta"].includes(location.pathname) || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), isAdmin: Boolean(context.adminSession), logout });
   else renderParticipant(surface, context.state, api, rerender);
   if (context.feedbackOpen) surface.insertAdjacentHTML("beforeend", feedbackModal());
   restoreDrafts(surface);

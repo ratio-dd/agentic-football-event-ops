@@ -1,6 +1,7 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { loadTenantRegistry } from "../config/tenant-registry.mjs";
 
 function argument(name) { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] || "" : ""; }
 function escapeHtml(value) { return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;"); }
@@ -73,13 +74,16 @@ function html(bundle) {
 
 async function main() {
   const databasePath = resolve(argument("--db")); const outputDirectory = resolve(argument("--output-dir"));
-  if (!argument("--db") || !argument("--output-dir")) throw new Error("必须显式提供 --db 和 --output-dir");
+  const tenantId = argument("--tenant-id");
+  if (!argument("--db") || !argument("--output-dir") || !tenantId) throw new Error("必须显式提供 --db、--output-dir 和 --tenant-id");
+  const registry = await loadTenantRegistry(); const tenant = registry.tenantForId(tenantId);
+  if (!tenant) throw new Error(`租户注册表中没有 tenant ${tenantId}`);
   await access(databasePath);
   await access(dirname(outputDirectory));
   const database = new DatabaseSync(databasePath, { readOnly: true });
   let row;
-  try { row = database.prepare("SELECT data, version FROM event_state WHERE id = ?").get("beijing-meetup-2026"); } finally { database.close(); }
-  if (!row) throw new Error("数据库中没有 Agentic Football 活动状态");
+  try { row = database.prepare("SELECT data, version FROM event_state WHERE id = ?").get(tenant.tenantId); } finally { database.close(); }
+  if (!row) throw new Error(`数据库中没有 tenant ${tenant.tenantId} 的活动状态`);
   const bundle = buildPackage(JSON.parse(row.data), Number(row.version)); assertRedacted(bundle);
   await mkdir(outputDirectory);
   const jsonPath = join(outputDirectory, "offline-ops.json"); const htmlPath = join(outputDirectory, "index.html");

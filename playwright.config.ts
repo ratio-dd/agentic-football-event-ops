@@ -1,9 +1,13 @@
 import { defineConfig } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const localChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const launchOptions = process.env.CI ? {} : { executablePath: localChrome };
 const e2ePort = Number(process.env.E2E_PORT || "4173");
 const e2eBaseUrl = `http://localhost:${e2ePort}`;
+const e2eDatabasePath = process.env.E2E_DB_PATH || join(tmpdir(), `operator-workbench-e2e-${process.pid}-${Date.now()}.db`);
+process.env.E2E_ACTIVE_DB_PATH = e2eDatabasePath;
 
 // Playwright's local web-server readiness check must never use a workstation
 // proxy for loopback traffic.
@@ -27,13 +31,19 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  globalTeardown: "./tests/e2e/global-teardown.mjs",
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${e2ePort}`,
+    command: "npm run lightsail:start",
     env: {
       ...process.env,
-      PLAYWRIGHT_E2E: "1",
-      STAFF_PINS: JSON.stringify([{ id: "e2e-staff", pin: "meetup-staff", enabled: true }]),
-      ADMIN_PIN: "meetup-admin",
+      PORT: String(e2ePort),
+      EVENT_DB_PATH: e2eDatabasePath,
+      TENANT_ADMIN_PINS: JSON.stringify({ "beijing-meetup-2026": "meetup-admin", "shanghai-meetup-2026": "shanghai-admin" }),
+      PLATFORM_ADMIN_PIN: "platform-e2e-admin",
+      TENANT_STAFF_PINS: JSON.stringify({
+        "beijing-meetup-2026": [{ id: "e2e-beijing-staff", pin: "meetup-staff", enabled: true }],
+        "shanghai-meetup-2026": [{ id: "e2e-shanghai-staff", pin: "shanghai-staff", enabled: true }],
+      }),
     },
     url: `${e2eBaseUrl}/`,
     // Reusing a manually started server can accidentally pick up real local

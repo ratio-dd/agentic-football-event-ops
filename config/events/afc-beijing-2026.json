@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "beijing-meetup-2026",
+  "name": "Agentic Football 现场运营台",
+  "branding": {
+    "brandName": "Agentic Football",
+    "locationLabel": "北京 MeetUp",
+    "displayLabel": "AGENTIC FOOTBALL · 北京 MEETUP",
+    "pageTitle": "Agentic Football 北京 MeetUp"
+  },
+  "links": {
+    "workshopUrl": "https://example.com/agentic-football-workshop",
+    "gamePortalUrl": "https://agentic-football.aws.dev/"
+  },
+  "teamPolicy": {
+    "minMembers": 1,
+    "maxMembers": 3,
+    "maxTeams": 32
+  },
+  "tournamentPolicy": {
+    "maxTeamsPerGroup": 4,
+    "maxGroups": 8,
+    "defaultQualifiersPerGroup": 2,
+    "maxQualifiersPerGroup": 2
+  },
+  "defaultGates": {
+    "selfServiceTeam": false,
+    "participantHelp": false,
+    "codeIssuance": true,
+    "qualification": true,
+    "scheduleEditing": true,
+    "publicMaintenanceSnapshot": false
+  }
+}

@@ -28,8 +28,8 @@ jobs:
       - name: Configure isolated Worker bindings for E2E
         run: |
           cat > .dev.vars <<'EOF'
-          STAFF_PINS=[{"id":"e2e-staff","pin":"meetup-staff","enabled":true}]
-          ADMIN_PIN=meetup-admin
+          TENANT_STAFF_PINS={"beijing-meetup-2026":[{"id":"e2e-staff","pin":"meetup-staff","enabled":true}]}
+          TENANT_ADMIN_PINS={"beijing-meetup-2026":"meetup-admin"}
           EOF
       - run: npm test
       - name: Run isolated 24/32-team release acceptance

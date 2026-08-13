@@ -4,7 +4,7 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
-const TEST_ENV = { STAFF_PINS: JSON.stringify([{ id: "test-staff", pin: "test-staff", enabled: true }]), ADMIN_PIN: "test-admin" };
+const TEST_ENV = { EVENT_CONFIG: await read("config/events/afc-beijing-2026.json"), STAFF_PINS: JSON.stringify([{ id: "test-staff", pin: "test-staff", enabled: true }]), ADMIN_PIN: "test-admin" };
 const resourceCodes = (codes) => ({ workshopCodes: codes, gamePortalCodes: codes.map((code) => `PORTAL-${code}`) });
 
 class MemoryD1 {
@@ -24,7 +24,7 @@ class MemoryD1 {
 }
 
 async function eventWorker() {
-  const url = new URL("../dist/server/index.js", import.meta.url); url.searchParams.set("test", `${Date.now()}-${Math.random()}`);
+  const url = new URL("../lightsail/runtime/worker.mjs", import.meta.url); url.searchParams.set("test", `${Date.now()}-${Math.random()}`);
   return (await import(url.href)).default;
 }
 async function call(worker, db, path, { method = "GET", client = "", staff = "", admin = "", body } = {}) {
@@ -39,7 +39,7 @@ async function elevate(worker, db, staff) {
 }
 
 test("onsite state machine keeps team assignment in the Staff workflow", async () => {
-  const worker = await read("worker/index.ts");
+  const [worker, defaultEventConfig] = await Promise.all([read("worker/index.ts"), read("config/events/afc-beijing-2026.json")]);
   assert.match(worker, /\/api\/participants\/rebind/);
   assert.match(worker, /\/api\/ops\/codes\/import/);
   assert.match(worker, /\/api\/admin\/codes\/game-portal\/backfill/);
@@ -52,11 +52,18 @@ test("onsite state machine keeps team assignment in the Staff workflow", async (
   assert.match(worker, /需要管理后台权限/);
   assert.match(worker, /此环境尚未配置 Staff PIN/);
   assert.match(worker, /\/api\/teams\/self/);
-  assert.match(worker, /selfServiceTeam: false/);
+  assert.match(defaultEventConfig, /"selfServiceTeam": false/);
+  assert.match(worker, /EVENT_CONFIG/);
   assert.doesNotMatch(worker, /function createTeam\(/);
   assert.doesNotMatch(worker, /function joinTeam\(/);
   assert.doesNotMatch(worker, /inviteCode/);
   assert.doesNotMatch(worker, /captainId/);
+});
+
+test("Worker fails closed when the server omits tenant scope", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const response = await worker.fetch(new Request("http://localhost/api/state"), { DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  assert.equal(response.status, 500); assert.match((await response.json()).error, /缺少 tenant scope/);
 });
 
 test("mobile participant and staff surfaces match the on-site workflow", async () => {
@@ -84,6 +91,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(staff, /现场开关/);
   assert.match(staff, /bottom-tabs/);
   assert.match(app, /\/staff/);
+  assert.match(app, /"\/ta"/);
   assert.match(app, /formDraft/);
   assert.match(app, /restoreDrafts/);
   assert.match(app, /captureInputFocus/);
@@ -130,7 +138,7 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
 
 test("shared deployment fails closed without configured Staff and administrator credentials", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
-  const noStaff = await worker.fetch(new Request("https://feedback.example/api/ops/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staffPin: "anything", staffNickname: "测试" }) }), { DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
+  const noStaff = await worker.fetch(new Request("https://feedback.example/api/ops/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staffPin: "anything", staffNickname: "测试" }) }), { EVENT_CONFIG: TEST_ENV.EVENT_CONFIG, DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
   assert.equal(noStaff.status, 503);
   const registered = await call(worker, db, "/api/participants", { method: "POST", client: "gate-phone", body: { nickname: "开关测试", supportProfile: {} } });
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "管理员" } });
