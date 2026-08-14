@@ -37,8 +37,8 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await capture(page, testInfo, "01-participant-registration");
     await page.getByLabel("昵称", { exact: true }).fill(participantName);
     await page.getByRole("button", { name: "完成登记" }).click();
-    await expect(page.getByRole("heading", { name: "等待工作人员安排队伍" })).toBeVisible();
-    await capture(page, testInfo, "02-participant-waiting-team");
+    await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
+    await capture(page, testInfo, "02-participant-solo-team");
 
     const staffLogin = await api(request, "/api/ops/session", { method: "POST", body: { staffPin: "meetup-staff", staffNickname: `画廊初始化${stamp}` } });
     const staff = staffLogin.staffSession;
@@ -46,24 +46,22 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     const admin = elevated.adminSession;
     const stateAfterRegistration = await api(request, "/api/ops/state", { staff });
     const registeredParticipant = stateAfterRegistration.participants.find((person: { nickname?: string }) => person.nickname === participantName);
-    const assigned = await api(request, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [registeredParticipant.id] } });
-    const selfTeam = assigned.team;
+    const selfTeam = stateAfterRegistration.teams.find((team: { id: string }) => team.id === registeredParticipant.teamId);
     await page.reload();
     await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
-    await capture(page, testInfo, "03-participant-staff-assigned-team");
+    await capture(page, testInfo, "03-participant-confirmed-solo-team");
     const workshopCodes = Array.from({ length: 12 }, (_, index) => `VISUAL-WORKSHOP-${stamp}-${index + 1}`);
     await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `VISUAL-PORTAL-${code}`) } });
     await api(request, `/api/ops/teams/${selfTeam.id}/issue-code`, { method: "POST", staff, body: {} });
     await page.goto("/");
-    await page.getByRole("button", { name: "我的二维码" }).click();
     await expect(page.getByText("Workshop Code", { exact: true })).toBeVisible();
-    await capture(page, testInfo, "04-participant-code-and-qr");
+    await capture(page, testInfo, "04-participant-code");
     await api(request, `/api/ops/qualification/teams/${selfTeam.id}/confirm`, { method: "POST", staff, body: {} });
     await page.reload();
-    await expect(page.getByText("已确认参加下午比赛", { exact: true })).toBeVisible();
+    await expect(page.getByText("已确认参加比赛", { exact: true })).toBeVisible();
     await capture(page, testInfo, "04a-participant-qualified");
 
-    const people: Array<{ id: string; staffShortId: string }> = [];
+    const people: Array<{ id: string; nickname: string }> = [];
     for (let index = 1; index <= 5; index += 1) {
       const created = await api(request, "/api/participants", { method: "POST", client: `visual-review-${stamp}-${index}`, body: { nickname: `画廊人员${stamp}-${index}` } });
       people.push(created.participant);
@@ -77,18 +75,6 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await api(request, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: teams.map((team) => team.id) } });
     await api(request, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 2, qualifiersPerGroup: 1 } });
 
-    await page.addInitScript((shortId) => {
-      let hasScanned = false;
-      class MockBarcodeDetector {
-        async detect() {
-          if (!hasScanned) { hasScanned = true; return [{ rawValue: shortId }]; }
-          return [];
-        }
-      }
-      Object.defineProperty(window, "BarcodeDetector", { configurable: true, value: MockBarcodeDetector });
-      Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => new MediaStream() } });
-    }, people[4].staffShortId);
-
     await page.goto("/staff");
     await capture(page, testInfo, "05-staff-login");
     await page.getByLabel("工作台 PIN").fill("meetup-staff");
@@ -99,12 +85,13 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
 
     await page.getByRole("button", { name: "组队", exact: true }).click();
     await capture(page, testInfo, "07-staff-people-board");
-    await page.getByRole("button", { name: "扫描参与者二维码" }).click();
-    await expect(page.getByText("扫描结果", { exact: true })).toBeVisible();
-    await capture(page, testInfo, "07a-staff-qr-scan-result");
-    await page.getByRole("button", { name: "选中并调度" }).click();
+    await page.getByLabel("查找人员").fill(people[4].nickname);
+    const searchedPerson = page.locator(`[data-person-id="${people[4].id}"]`);
+    await expect(searchedPerson).toContainText(people[4].nickname);
+    await capture(page, testInfo, "07a-staff-nickname-search-result");
+    await searchedPerson.click();
     await capture(page, testInfo, "08-staff-people-selected");
-    await page.getByRole("button", { name: "下一步：确认新队" }).click();
+    await page.getByRole("button", { name: "合并为新队" }).click();
     await expect(page.getByRole("heading", { name: "确认组成新队" })).toBeVisible();
     await capture(page, testInfo, "09-staff-assignment-confirm");
     await page.getByRole("button", { name: "取消" }).click();

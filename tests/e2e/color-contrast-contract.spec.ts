@@ -149,24 +149,15 @@ test("Staff list rows keep readable colors across normal, selected, full, hover,
   const allFilter = page.getByRole("button", { name: /全部/ }).last();
   await expectControlStatesReadable(allFilter, "人员筛选");
   await expectControlStatesReadable(page.locator('[data-grouping-tab="people"]'), "人员/队伍切换");
-  await expectControlStatesReadable(page.getByRole("button", { name: "下一步：确认新队" }), "编组主操作");
-  await expectControlStatesReadable(page.getByRole("button", { name: "加入队伍" }), "编组次操作");
+  await expectControlStatesReadable(page.getByRole("button", { name: "合并为新队" }), "编组主操作");
+  await expectControlStatesReadable(page.getByRole("button", { name: "合并到已有队伍" }), "编组次操作");
   await expectControlStatesReadable(page.getByRole("button", { name: "清除" }), "编组静默操作");
   await expectControlStatesReadable(page.getByRole("button", { name: "组队", exact: true }), "底部活动 Tab");
 
-  await page.getByRole("button", { name: "加入队伍" }).click();
+  await page.getByRole("button", { name: "合并到已有队伍" }).click();
   const fullTeamButton = page.locator(`[data-action="choose-team"][data-team-id="${fullTeam.id}"]`);
-  await expect(fullTeamButton).toBeDisabled();
-  const disabledColors = await fullTeamButton.evaluate((element) => ({
-    background: getComputedStyle(element).backgroundColor,
-    text: getComputedStyle(element.querySelector("strong")!).color,
-    detail: getComputedStyle(element.querySelector("small")!).color,
-    meta: getComputedStyle(element.querySelector("em")!).color,
-  }));
-  expect(contrast(disabledColors.text, disabledColors.background)).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(disabledColors.detail, disabledColors.background)).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(disabledColors.meta, disabledColors.background)).toBeGreaterThanOrEqual(4.5);
-  await expect(fullTeamButton).toHaveCSS("outline-style", "none");
+  await expect(fullTeamButton).toBeEnabled();
+  await expectControlStatesReadable(fullTeamButton, "不限人数目标队伍");
 
   const availableTeamButton = page.locator(`[data-action="choose-team"]:not(:disabled)`).first();
   await expectControlStatesReadable(availableTeamButton, "可加入目标队伍");
@@ -205,7 +196,6 @@ test("participant ticket labels remain readable on identity and resource cards",
     background: getComputedStyle(element).backgroundColor,
   }));
   expect(contrast(resourceHeaderColors.foreground, resourceHeaderColors.background)).toBeGreaterThanOrEqual(4.5);
-  await expectControlStatesReadable(page.getByRole("button", { name: "我的二维码" }), "参与者二维码操作");
   await expectControlStatesReadable(page.getByRole("button", { name: "反馈" }), "参与者反馈操作");
 });
 
@@ -222,8 +212,8 @@ test("semantic palette matrix keeps every reusable control role readable", async
         <main>
           <div class="grouping-tabs"><button class="active" data-state-id="grouping-tab-active">人员</button><button data-state-id="grouping-tab">队伍</button></div>
           <div class="filter-row"><button class="active" data-state-id="filter-active">全部</button><button data-state-id="filter">无队</button></div>
-          <button class="dispatch-person-row" data-state-id="person-row"><span><strong>人员行</strong><small>P-001 · 无队</small></span><span class="dispatch-check">选择</span></button>
-          <button class="dispatch-person-row is-selected" data-state-id="person-row-selected"><span><strong>已选人员</strong><small>P-002 · T-001</small></span><span class="dispatch-check">已选</span></button>
+          <button class="dispatch-person-row" data-state-id="person-row"><span><strong>人员行</strong><small>无队</small></span><span class="dispatch-check">选择</span></button>
+          <button class="dispatch-person-row is-selected" data-state-id="person-row-selected"><span><strong>已选人员</strong><small>T-001</small></span><span class="dispatch-check">已选</span></button>
           <button class="team-board-card" data-state-id="team-row"><span><strong>T-001</strong><small>成员甲</small></span><span><em>2 / 3</em><small>编组中</small></span></button>
           <section class="selection-tray"><div><button data-state-id="tray-primary">确认新队</button><button class="secondary" data-state-id="tray-secondary">加入队伍</button><button class="text-button" data-state-id="tray-quiet">清除</button></div></section>
           <section class="staff-workshop-list"><article><div class="workshop-team-actions"><button class="note-button" data-state-id="workshop-note">备注</button><button class="qualify-button" data-state-id="workshop-qualify">确认可参赛</button></div></article></section>
@@ -233,12 +223,12 @@ test("semantic palette matrix keeps every reusable control role readable", async
         <div class="modal-backdrop"><section class="dispatch-modal"><div class="modal-header"><button class="text-button" data-state-id="modal-close">关闭</button></div><section class="team-resource-card"><span class="resource-actions"><button data-state-id="resource-primary">发放 Code</button><button class="secondary" data-state-id="resource-secondary">确认队伍</button></span></section><section class="modal-section"><button data-state-id="modal-primary">加入此队</button></section><div class="team-picker-list"><button data-state-id="picker-available"><span><strong>T-002</strong><small>可加入</small></span><span class="team-picker-meta"><em>2 / 3</em><small>可发放资源</small></span></button><button disabled data-state-id="picker-full"><span><strong>T-003</strong><small>满员</small></span><span class="team-picker-meta"><em>3 / 3</em><small>容量不足</small></span></button></div></section></div>
       </div>
       <div class="state-matrix admin-shell"><header class="admin-top"><div class="top-actions"><button class="text-button" data-state-id="admin-header-text">返回 Staff</button></div></header><main><nav class="admin-nav"><button class="active" data-state-id="admin-nav-active">活动设置</button><button data-state-id="admin-nav">资源管理</button></nav><section class="admin-panel"><form class="admin-form"><button data-state-id="admin-primary">保存设置</button><button disabled data-state-id="admin-disabled">生成赛程</button></form><div class="admin-list"><button class="secondary" data-state-id="admin-secondary">回收 Code</button></div></section></main></div>
-      <div class="participant-experience"><header class="participant-topbar"><div class="participant-top-actions"><button class="text-button" data-state-id="participant-header-text">反馈</button></div></header><main><button class="ticket-primary" data-state-id="participant-primary">完成登记</button><button class="ticket-qr-button" data-state-id="participant-qr">我的二维码</button><button class="ticket-primary" disabled data-state-id="participant-disabled">提交中</button></main></div>`;
+      <div class="participant-experience"><header class="participant-topbar"><div class="participant-top-actions"><button class="text-button" data-state-id="participant-header-text">反馈</button></div></header><main><button class="ticket-primary" data-state-id="participant-primary">完成登记</button><button class="ticket-primary" disabled data-state-id="participant-disabled">提交中</button></main></div>`;
   });
 
   const controls = page.locator("[data-state-id]");
   const count = await controls.count();
-  expect(count).toBeGreaterThanOrEqual(24);
+  expect(count).toBeGreaterThanOrEqual(23);
   for (let index = 0; index < count; index += 1) {
     const control = controls.nth(index);
     await expectControlStatesReadable(control, `palette:${await control.getAttribute("data-state-id")}`);

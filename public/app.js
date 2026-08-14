@@ -68,7 +68,7 @@ async function request(path, { method = "GET", body, staff = false } = {}) {
   if (context.adminSession) headers["x-admin-session"] = context.adminSession;
   const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "操作未完成，请重试");
+  if (!response.ok) { const error = new Error(data.error || "操作未完成，请重试"); error.status = response.status; throw error; }
   return data;
 }
 
@@ -86,16 +86,17 @@ const api = {
   dispatchPeople: (participantIds, targetTeamId, dissolutionActions = {}) => request("/api/ops/assignments", { method: "POST", body: { participantIds, targetTeamId, dissolutionActions }, staff: true }),
   updateTeam: (teamId, memberIds) => request(`/api/ops/teams/${teamId}/members`, { method: "PUT", body: { memberIds }, staff: true }),
   removeTeam: (teamId) => request(`/api/ops/teams/${teamId}`, { method: "DELETE", body: {}, staff: true }),
-  allocationPreview: (allocationSeed = "") => request("/api/ops/allocation/preview", { method: "POST", body: { allocationSeed }, staff: true }),
-  publishAllocation: (runId) => request(`/api/ops/allocation/${runId}/publish`, { method: "POST", body: {}, staff: true }),
   splitManualTeam: (teamId, groups, confirmationNote) => request(`/api/ops/teams/${teamId}/split`, { method: "POST", body: { groups, confirmationNote }, staff: true }),
   releaseManualMembers: (teamId, memberIds, confirmationNote) => request(`/api/ops/teams/${teamId}/release`, { method: "POST", body: { memberIds, confirmationNote }, staff: true }),
   confirmTeam: (teamId) => request(`/api/ops/teams/${teamId}/confirm`, { method: "POST", body: {}, staff: true }),
   updateTeamStatus: (teamId, status) => request(`/api/ops/teams/${teamId}/status`, { method: "PUT", body: { status }, staff: true }),
   updateEventGates: (gates) => request("/api/ops/event-gates", { method: "PUT", body: { gates }, staff: true }),
+  updateEventSettings: (payload) => request("/api/ops/event-settings", { method: "PUT", body: payload, staff: true }),
   importResourceCodes: ({ workshopCodes, gamePortalCodes }) => request("/api/ops/codes/import", { method: "POST", body: { workshopCodes, gamePortalCodes }, staff: true }),
+  batchIssueCodes: (teamIds) => request("/api/ops/codes/batch-issue", { method: "POST", body: { teamIds }, staff: true }),
   backfillGamePortalCodes: () => request("/api/admin/codes/game-portal/backfill", { method: "POST", body: {}, staff: true }),
   diagnostics: () => request("/api/admin/diagnostics", { staff: true }),
+  archiveAndResetEvent: (confirmation) => request("/api/admin/event/archive-reset", { method: "POST", body: { confirmation }, staff: true }),
   setEventLinks: (workshopUrl, gamePortalUrl) => request("/api/ops/event-links", { method: "PUT", body: { workshopUrl, gamePortalUrl }, staff: true }),
   reclaimCode: (teamId) => request(`/api/admin/teams/${teamId}/reclaim-code`, { method: "POST", body: {}, staff: true }),
   issueCode: (teamId) => request(`/api/ops/teams/${teamId}/issue-code`, { method: "POST", body: {}, staff: true }),
@@ -105,35 +106,42 @@ const api = {
   revokeQualification: (teamId, note) => request(`/api/ops/qualification/teams/${teamId}/revoke`, { method: "POST", body: { note }, staff: true }),
   freezeCompetition: (teamIds) => request("/api/ops/competition/freeze", { method: "POST", body: { teamIds }, staff: true }),
   unfreezeCompetition: () => request("/api/ops/competition/unfreeze", { method: "POST", body: {}, staff: true }),
-  tournament: (groupCount, qualifiersPerGroup) => request("/api/ops/competition/generate", { method: "POST", body: { groupCount, qualifiersPerGroup }, staff: true }),
+  tournament: () => request("/api/ops/competition/generate", { method: "POST", body: {}, staff: true }),
+  advanceGroupRound: () => request("/api/ops/competition/advance-group-round", { method: "POST", body: {}, staff: true }),
+  advanceKnockoutRound: () => request("/api/ops/competition/advance-knockout-round", { method: "POST", body: {}, staff: true }),
   updateTournamentGroups: (groups) => request("/api/ops/competition/groups", { method: "PUT", body: { groups }, staff: true }),
   swapTournamentTeams: (firstTeamId, secondTeamId) => request("/api/ops/competition/swap", { method: "POST", body: { firstTeamId, secondTeamId }, staff: true }),
   generateKnockout: () => request("/api/ops/competition/knockout", { method: "POST", body: {}, staff: true }),
-  rebuildKnockout: () => request("/api/ops/competition/knockout/rebuild", { method: "POST", body: {}, staff: true }),
   voidTournament: (reason) => request("/api/ops/competition/void", { method: "POST", body: { reason }, staff: true }),
   result: (matchId, scoreA, scoreB) => request(`/api/ops/matches/${matchId}/result`, { method: "POST", body: { scoreA, scoreB }, staff: true }),
 };
 
 async function refresh() {
-  if (context.staffUi.scannerOpen) return;
   try {
     const statePath = location.pathname === "/admin" && context.adminSession ? "/api/admin/state" : context.staffSession ? "/api/ops/state" : "/api/state";
     context.state = await request(statePath, { staff: Boolean(context.staffSession) });
     context.error = "";
-  } catch (error) { context.error = error.message || "暂时无法加载活动数据"; }
+  } catch (error) {
+    if (error.status === 403 && (context.staffSession || context.adminSession)) {
+      sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = "";
+      if (location.pathname === "/admin") history.replaceState({}, "", "/staff");
+      context.state = await request("/api/state"); context.error = "登录状态已失效，请重新输入工作人员 PIN。";
+    } else context.error = error.message || "暂时无法加载活动数据";
+  }
   render();
 }
 async function login(payload) { const result = await api.staffLogin(payload); context.staffSession = result.staffSession; sessionStorage.setItem(STAFF_KEY, result.staffSession); await refresh(); }
-async function loginAdmin(adminPin) { const result = await api.adminLogin(adminPin); context.adminSession = result.adminSession; sessionStorage.setItem(ADMIN_KEY, result.adminSession); history.pushState({}, "", "/admin"); await refresh(); }
+async function loginAdmin(adminPin) { const result = await api.adminLogin(adminPin); context.adminSession = result.adminSession; context.staffUi.adminAccessOpen = false; sessionStorage.setItem(ADMIN_KEY, result.adminSession); history.pushState({}, "", "/admin"); await refresh(); }
 function render() {
   if (!context.state) { app.innerHTML = `<main class="loading-screen"><p>${context.error || "正在加载 Agentic Football 现场运营台…"}</p></main>`; return; }
   const focus = captureInputFocus();
   const surface = document.createElement("main"); surface.className = "app-surface"; app.replaceChildren(surface);
   const rerender = async () => refresh();
   const logout = () => { sessionStorage.removeItem(STAFF_KEY); sessionStorage.removeItem(ADMIN_KEY); context.staffSession = ""; context.adminSession = ""; history.pushState({}, "", "/"); refresh(); };
-  if (location.pathname === "/admin") renderAdmin(surface, context.state, api, { refresh: rerender, ui: context.adminUi, hasAdmin: Boolean(context.adminSession), returnToStaff: () => { history.pushState({}, "", "/staff"); refresh(); } });
+  if (location.pathname === "/admin") renderAdmin(surface, context.state, api, { refresh: rerender, ui: context.adminUi, hasAdmin: Boolean(context.adminSession), returnToStaff: () => { context.staffUi.adminAccessOpen = false; history.pushState({}, "", "/staff"); refresh(); } });
   else if (location.pathname === "/staff" || context.staffSession) renderStaff(surface, context.state, api, { login, adminLogin: loginAdmin, refresh: rerender, ui: context.staffUi, loggedIn: Boolean(context.staffSession), logout });
   else renderParticipant(surface, context.state, api, rerender);
+  if (context.error) { const notice = surface.querySelector(".notice"); if (notice) notice.textContent = context.error; }
   if (context.feedbackOpen) surface.insertAdjacentHTML("beforeend", feedbackModal());
   restoreDrafts(surface);
   restoreInputFocus(surface, focus);
@@ -143,4 +151,4 @@ app.addEventListener("click", (event) => { const button = event.target.closest("
 app.addEventListener("submit", async (event) => { const form = event.target; if (!(form instanceof HTMLFormElement) || form.id !== "feedback-form") return; event.preventDefault(); const button = form.querySelector("button"); if (button) button.disabled = true; try { await api.submitFeedback(new FormData(form).get("note")); context.feedbackOpen = false; await refresh(); } catch (error) { const notice = form.closest(".app-surface")?.querySelector(".notice"); if (notice) notice.textContent = error.message; else window.alert(error.message); } finally { if (button) button.disabled = false; } });
 window.addEventListener("popstate", refresh);
 refresh();
-window.setInterval(refresh, 5000);
+window.setInterval(() => { if (location.pathname !== "/admin") refresh(); }, 5000);

@@ -93,8 +93,7 @@
 .participant-experience .ticket-join-form input:focus { border-color: var(--ticket-green); outline: 3px solid var(--ticket-ink); outline-offset: 1px; }
 .participant-experience .ticket-primary,
 .participant-experience .ticket-secondary,
-.participant-experience .ticket-arrow,
-.participant-experience .ticket-qr-button { border: 2px solid var(--ticket-ink); border-radius: 8px; box-shadow: 2px 2px 0 var(--ticket-ink); font-weight: 900; }
+.participant-experience .ticket-arrow { border: 2px solid var(--ticket-ink); border-radius: 8px; box-shadow: 2px 2px 0 var(--ticket-ink); font-weight: 900; }
 .participant-experience button:focus-visible,
 .participant-experience a:focus-visible { outline: 3px solid var(--ticket-ink); outline-offset: 2px; }
 .participant-experience .ticket-primary:focus-visible { outline-color: var(--ticket-cream); outline-offset: 0; }
@@ -104,8 +103,7 @@
 .participant-experience .ticket-secondary { min-height: 44px; background: #fff; color: var(--ticket-green); }
 .participant-experience .ticket-primary:active,
 .participant-experience .ticket-secondary:active,
-.participant-experience .ticket-arrow:active,
-.participant-experience .ticket-qr-button:active { transform: translate(2px, 2px); box-shadow: none; }
+.participant-experience .ticket-arrow:active { transform: translate(2px, 2px); box-shadow: none; }
 .participant-experience .ticket-details { margin-top: 16px; padding-top: 15px; border-top: 1px dashed #839084; }
 .participant-experience .ticket-details summary { color: var(--ticket-green); cursor: pointer; font-size: 13px; font-weight: 850; }
 .participant-experience .participant-id-ticket { --ticket-frame-fill: #fff4ca; }
@@ -117,20 +115,6 @@
 .participant-experience .ticket-code { display: block; color: var(--ticket-ink); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-weight: 950; letter-spacing: .015em; text-shadow: 2px 2px 0 var(--ticket-cream), 3px 3px 0 var(--ticket-ink); }
 .participant-experience .person-ticket-number { margin: 3px 0 5px; font-size: clamp(31px, 8vw, 48px); line-height: 1; }
 .participant-experience .participant-id-ticket small { color: #536055; font-size: 12px; }
-.participant-experience .ticket-qr-button { min-height: 42px; padding: 0 10px; background: var(--ticket-cream); color: var(--ticket-ink); font-size: 12px; white-space: nowrap; }
-.participant-experience .participant-qr-overlay { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 22px; background: rgba(8,31,23,.58); }
-.participant-experience .participant-qr-ticket { --ticket-frame-fill: var(--ticket-green); width: min(100%, 420px); text-align: center; }
-.participant-experience .participant-qr-ticket .ticket-surface { padding: 0; overflow: hidden; }
-.participant-experience .qr-ticket-top { display: flex; align-items: center; justify-content: space-between; min-height: 57px; padding: 12px 18px; border-bottom: 2px solid var(--ticket-ink); background-color: var(--ticket-green); background-image: radial-gradient(circle at 15px 15px, rgba(255,255,255,.18) 0 2px, transparent 2.7px), linear-gradient(105deg, var(--ticket-green), var(--ticket-emerald)); background-size: 18px 18px, auto; color: #fffdf2; font-size: 19px; font-weight: 950; }
-.participant-experience .ticket-close { width: 32px; height: 32px; border: 1px solid rgba(255,255,255,.75); border-radius: 7px; background: transparent; color: #fff; font-size: 24px; line-height: 1; }
-.participant-experience .qr-ticket-body { margin: 0 12px 12px; padding: 25px 20px 21px; border-radius: 0 0 8px 8px; background: linear-gradient(135deg, #fffef8, #fff1c5); }
-.participant-experience .qr-code-stage { position: relative; display: grid; width: min(224px, 100%); aspect-ratio: 1; place-items: center; margin: 0 auto 12px; padding: 16px; background: #fffef8; }
-.participant-experience .qr-code-stage::before,
-.participant-experience .qr-code-stage::after { position: absolute; width: 33px; height: 33px; content: ""; pointer-events: none; }
-.participant-experience .qr-code-stage::before { top: -2px; left: -2px; border-top: 4px solid var(--ticket-green); border-left: 4px solid var(--ticket-green); border-radius: 4px 0 0 0; }
-.participant-experience .qr-code-stage::after { right: -2px; bottom: -2px; border-right: 4px solid var(--ticket-green); border-bottom: 4px solid var(--ticket-green); border-radius: 0 0 4px 0; }
-.participant-experience .participant-qr-ticket img { display: block; width: min(178px, 100%); height: auto; padding: 7px; background: #fff; }
-.participant-experience .participant-qr-ticket p { margin: 0; color: #526055; font-size: 13px; }
 .participant-experience .participant-team-action { background: linear-gradient(135deg, rgba(255,255,255,.94), rgba(255,224,138,.23)); }
 .participant-experience .ticket-support { margin: 7px 0 0; font-size: 14px; }
 .participant-experience .ticket-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: #5f6e62; font-size: 12px; font-weight: 800; text-align: center; }
@@ -171,4 +155,4 @@
 .participant-experience .participant-status-strip.qualified { border-color: #bd8708; background: linear-gradient(110deg, #fffdf4, #fff0bd); }.participant-experience .participant-status-strip.qualified > span { background: var(--ticket-emerald); color: #fff; }.participant-experience .participant-status-strip div { position: relative; z-index: 1; min-width: 0; }.participant-experience .participant-status-strip strong { color: var(--ticket-ink); font-size: 15px; }.participant-experience .participant-status-strip p { margin: 2px 0 0; color: #5d695f; font-size: 12px; }
 .participant-experience .participant-schedule { background: #fffdf6; }.participant-experience .participant-schedule h3 { margin: 18px 0 0; color: var(--ticket-ink); font-size: 14px; }.participant-experience .participant-standings { display: grid; grid-template-columns: 1fr 1fr; margin: 14px 0; border: 2px solid var(--ticket-ink); border-radius: 8px; overflow: hidden; }.participant-experience .participant-standings article { padding: 10px 11px; background: #fffef8; }.participant-experience .participant-standings article + article { border-left: 1px dashed #a9ad97; }.participant-experience .participant-standings span, .participant-experience .participant-standings strong { display: block; }.participant-experience .participant-standings span { color: #68746d; font-size: 12px; }.participant-experience .participant-standings strong { margin-top: 3px; color: var(--ticket-emerald); font-family: ui-monospace, monospace; font-size: 15px; }.participant-experience .participant-next-match { margin: 0; padding: 10px 11px; border: 2px solid #bd8708; border-radius: 8px; background: #fff2c8; color: var(--ticket-ink); font-size: 13px; font-weight: 850; }.participant-experience .ticket-match-list { margin: 10px 0 0; padding: 0; list-style: none; }.participant-experience .ticket-match-list li { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px dashed #a9ad97; }.participant-experience .ticket-match-list li > div { display: grid; gap: 3px; }.participant-experience .ticket-match-list small { color: #68746d; font-size: 11px; }.participant-experience .ticket-match-list strong { font-size: 13px; }.participant-experience .ticket-match-list em { flex: 0 0 auto; color: var(--ticket-emerald); font-family: ui-monospace, monospace; font-size: 15px; font-style: normal; font-weight: 900; }
 @media (min-width: 721px) { .participant-experience { border-right: 0; border-left: 0; } }
-@media (max-width: 430px) { .participant-experience { padding-right: 13px; padding-left: 13px; }.participant-brand em { display: none; }.participant-experience .participant-id-ticket .ticket-surface { grid-template-columns: 47px minmax(0, 1fr); }.participant-experience .id-ticket-icon { width: 47px; height: 58px; }.participant-experience .ticket-qr-button { grid-column: 1 / -1; }.participant-experience .participant-ticket { padding: 17px; }.participant-experience .ticket-stamped { padding: 0; }.participant-experience .ticket-stamped > .ticket-surface { padding: 19px 21px; }.participant-experience .participant-code-card { padding-top: 0; }.participant-experience .code-ticket-head { margin-right: -17px; margin-left: -17px; }.participant-experience .participant-qr-ticket .ticket-surface { padding: 0; }.participant-experience .qr-ticket-body { padding: 20px 14px 16px; } }
+@media (max-width: 430px) { .participant-experience { padding-right: 13px; padding-left: 13px; }.participant-brand em { display: none; }.participant-experience .participant-id-ticket .ticket-surface { grid-template-columns: 47px minmax(0, 1fr); }.participant-experience .id-ticket-icon { width: 47px; height: 58px; }.participant-experience .participant-ticket { padding: 17px; }.participant-experience .ticket-stamped { padding: 0; }.participant-experience .ticket-stamped > .ticket-surface { padding: 19px 21px; }.participant-experience .participant-code-card { padding-top: 0; }.participant-experience .code-ticket-head { margin-right: -17px; margin-left: -17px; } }

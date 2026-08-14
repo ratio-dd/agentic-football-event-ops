@@ -43,71 +43,54 @@ test("Staff stays on the selected daily-work tab after polling refresh", async (
   await expect(page.getByRole("heading", { name: "下一步一眼可见" })).toHaveCount(0);
 });
 
-test("Staff keeps automatic allocation open after polling refresh", async ({ page }) => {
-  await page.goto("/staff");
-  await page.getByLabel("工作台 PIN").fill("meetup-staff");
-  await page.getByLabel("显示昵称").fill("分配面板 E2E");
-  await page.getByRole("button", { name: "进入工作台" }).click();
-  await page.getByRole("button", { name: "组队", exact: true }).click();
-
-  const drawer = page.locator(".allocation-drawer");
-  await drawer.locator(":scope > summary").click();
-  await expect(drawer).toHaveAttribute("open", "");
-
-  await page.waitForTimeout(5_500);
-
-  await expect(drawer).toHaveAttribute("open", "");
-  await expect(page.getByRole("button", { name: "生成自动分配预览" })).toBeVisible();
+test("stale Staff and Admin sessions return to the PIN login instead of trapping every page", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("afc-event-ops-staff", "expired-staff-session");
+    sessionStorage.setItem("afc-event-ops-admin", "expired-admin-session");
+  });
+  await page.goto("/admin");
+  await expect(page).toHaveURL(/\/staff$/);
+  await expect(page.getByLabel("工作台 PIN")).toBeVisible();
+  await expect(page.locator(".notice")).toContainText("登录状态已失效");
+  await expect(page.getByText("需要工作人员 PIN")).toHaveCount(0);
 });
 
-test("Staff sees an actionable QR result and can return to manual search", async ({ page, request }, testInfo) => {
+test("participant and Staff identify people by nickname without P-number or QR controls", async ({ page, request }) => {
   const stamp = Date.now();
-  const response = await request.post("/api/participants", { data: { nickname: `扫码结果${stamp}` }, headers: { "x-client-id": `qr-result-${stamp}` } });
+  const clientId = `nickname-only-${stamp}`;
+  const response = await request.post("/api/participants", { data: { nickname: `昵称查找${stamp}` }, headers: { "x-client-id": clientId } });
   expect(response.ok()).toBeTruthy();
   const participant = (await response.json()).participant;
-  await page.addInitScript((shortId) => {
-    let hasScanned = false;
-    class MockBarcodeDetector {
-      async detect() {
-        if (!hasScanned) { hasScanned = true; return [{ rawValue: shortId }]; }
-        return [];
-      }
-    }
-    Object.defineProperty(window, "BarcodeDetector", { configurable: true, value: MockBarcodeDetector });
-    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async () => new MediaStream() } });
-  }, participant.staffShortId);
+
+  await page.goto(`/?acceptanceClient=${clientId}`);
+  await expect(page.getByText("你的昵称", { exact: true })).toBeVisible();
+  await expect(page.locator(".person-ticket-number")).toHaveText(participant.nickname);
+  await expect(page.getByRole("button", { name: "我的二维码" })).toHaveCount(0);
+  await expect(page.getByText(/P-\d{3}/)).toHaveCount(0);
 
   await page.goto("/staff");
   await page.getByLabel("工作台 PIN").fill("meetup-staff");
-  await page.getByLabel("显示昵称").fill(`扫码验收 ${stamp}`);
+  await page.getByLabel("显示昵称").fill(`昵称验收 ${stamp}`);
   await page.getByRole("button", { name: "进入工作台" }).click();
   await page.getByRole("button", { name: "组队", exact: true }).click();
-  await page.getByRole("button", { name: "扫描参与者二维码" }).click();
-
-  await expect(page.getByText("扫描结果", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: participant.nickname })).toBeVisible();
-  await expect(page.locator(".scan-result")).toContainText(participant.staffShortId);
-  await expect(page.getByRole("button", { name: "选中并调度" })).toBeVisible();
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: testInfo.outputPath("09-qr-result-mobile.png"), fullPage: false });
-
-  await page.getByRole("button", { name: "选中并调度" }).click();
-  await expect(page.getByText("已选择 1 / 3 人")).toBeVisible();
-  await page.getByRole("button", { name: "重新扫码" }).click();
-  await expect(page.getByRole("button", { name: "关闭扫描" })).toBeVisible();
-  await page.getByRole("button", { name: "关闭扫描" }).click();
-  await expect(page.locator(".scanner video")).toHaveCount(0);
-  await expect(page.getByLabel("查找人员")).toBeVisible();
+  await expect(page.getByRole("button", { name: "扫描参与者二维码" })).toHaveCount(0);
+  await expect(page.locator(".scanner")).toHaveCount(0);
+  await expect(page.getByText(/P-\d{3}/)).toHaveCount(0);
+  await page.getByLabel("查找人员").fill(participant.nickname);
+  const row = page.locator(`[data-person-id="${participant.id}"]`);
+  await expect(row).toContainText(participant.nickname);
+  await row.click();
+  await expect(page.getByText("已选择 1 人")).toBeVisible();
 });
 
-test("participant registration waits for Staff allocation without a T-number", async ({ page }) => {
+test("participant registration immediately receives a confirmed solo T-number", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("昵称", { exact: true }).fill(`自动编组体验员${Date.now()}`);
   await page.getByRole("button", { name: "完成登记" }).click();
 
-  await expect(page.getByRole("heading", { name: "等待工作人员安排队伍" })).toBeVisible();
-  await expect(page.getByText("队伍编号", { exact: true })).toHaveCount(0);
-  await expect(page.getByText(/T-\d{3}/)).toHaveCount(0);
+  await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
+  await expect(page.getByText(/T-\d{3}/)).toBeVisible();
+  await expect(page.getByText("✓ 队伍已就绪", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /创建一个队伍|加入队伍/ })).toHaveCount(0);
   await expect(page.getByText("队长", { exact: true })).toHaveCount(0);
 });
@@ -134,7 +117,7 @@ test("Staff creates a new team with one final confirmation and immediate pending
   await page.getByRole("button", { name: "组队", exact: true }).click();
   await page.getByLabel("查找人员").fill(`新队确认${stamp}`);
   await page.locator(`[data-person-id="${participant.id}"]`).click();
-  await page.getByRole("button", { name: "下一步：确认新队" }).click();
+  await page.getByRole("button", { name: "合并为新队" }).click();
   await expect(page.getByRole("heading", { name: "确认组成新队" })).toBeVisible();
   const confirm = page.getByRole("button", { name: "确认创建队伍" });
   await expect(confirm).toBeVisible();
@@ -193,7 +176,7 @@ test("Staff can move people from either board and sees capacity before a batch d
   await page.getByRole("button", { name: "组队", exact: true }).click();
   await page.getByLabel("查找人员").fill(`调度体验${stamp}-1`);
   await page.locator(`[data-person-id="${people[0].id}"]`).click();
-  await page.getByRole("button", { name: "加入队伍" }).click();
+  await page.getByRole("button", { name: "合并到已有队伍" }).click();
   await expect(page.locator("#team-picker-search")).toBeVisible();
   await page.locator("#team-picker-search").fill(teamB.teamNumber.replace("T-", ""));
   await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeEnabled();
@@ -214,8 +197,7 @@ test("Staff can move people from either board and sees capacity before a batch d
   await expect(page.getByRole("heading", { name: teamB.teamNumber, exact: true })).toBeVisible();
   await expect(page.locator(`[data-person-id="${people[3].id}"]`)).toBeVisible();
   await expect(page.locator('[data-team-people-filter="unassigned"]')).toBeVisible();
-  await page.locator(`[data-action="confirm-team"][data-team-id="${teamB.id}"]`).click();
-  await expect(page.getByText("队伍已确认，可以发放 Code。")).toBeVisible();
+  await expect(page.getByText(/队伍在创建或合并后已自动确认/)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("06-team-config-ready-for-code-mobile.png"), fullPage: false });
   await page.getByRole("button", { name: "关闭" }).click();
   const peopleTab = page.locator('[data-grouping-tab="people"]');
@@ -225,13 +207,60 @@ test("Staff can move people from either board and sees capacity before a batch d
   await page.locator(`[data-person-id="${people[3].id}"]`).click();
   await page.getByLabel("查找人员").fill(`调度体验${stamp}-5`);
   await page.locator(`[data-person-id="${people[4].id}"]`).click();
-  await page.getByRole("button", { name: "加入队伍" }).click();
-  await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeDisabled();
-  await expect(page.getByText("容量不足").last()).toBeVisible();
+  await page.getByRole("button", { name: "合并到已有队伍" }).click();
+  await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toBeEnabled();
+  await expect(page.locator(`[data-action="choose-team"][data-team-id="${teamB.id}"]`)).toContainText("合并后 5 人");
   await page.screenshot({ path: testInfo.outputPath("07-team-picker-capacity-mobile.png"), fullPage: false });
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await teamsTab.click();
   await expect(config).toContainText("管理");
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("08-person-team-dispatch-mobile.png"), fullPage: true });
+});
+
+test("Admin can archive and reset the event with two confirmations", async ({ page, request, browser }) => {
+  const stamp = Date.now();
+  const clientId = `archive-reset-e2e-${stamp}`;
+  const participantResponse = await request.post("/api/participants", {
+    data: { nickname: `归档验收${stamp}` },
+    headers: { "x-client-id": clientId },
+  });
+  expect(participantResponse.ok()).toBeTruthy();
+
+  await page.goto("/staff");
+  await page.getByLabel("工作台 PIN").fill("meetup-staff");
+  await page.getByLabel("显示昵称").fill(`归档管理员 ${stamp}`);
+  await page.getByRole("button", { name: "进入工作台" }).click();
+  await page.getByRole("button", { name: "更多", exact: true }).click();
+  await page.getByLabel("Admin PIN").fill("meetup-admin");
+  await page.getByRole("button", { name: "进入管理后台" }).click();
+
+  const resetButton = page.getByRole("button", { name: "归档并重置当前活动" });
+  await expect(resetButton).toBeVisible();
+  await resetButton.click();
+  await expect(page.getByRole("heading", { name: "确认归档当前活动？" })).toBeVisible();
+  await expect(page.getByText("第一步，共两步", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "我已了解，继续二次确认" }).click();
+  await expect(page.getByRole("heading", { name: "输入活动名称确认重置" })).toBeVisible();
+  await expect(page.getByText("第二步，共两步", { exact: true })).toBeVisible();
+  const confirmationDialog = page.getByRole("dialog", { name: "输入活动名称确认重置" });
+  const finalReset = confirmationDialog.getByRole("button", { name: "确认归档并重置" });
+  await expect(finalReset).toBeEnabled();
+  await finalReset.click();
+  await expect(confirmationDialog.getByRole("alert")).toContainText("请输入完整活动名称");
+  await confirmationDialog.getByLabel("活动名称", { exact: true }).fill("  Agentic Football 现场运营台  ");
+  await finalReset.click();
+
+  await expect(page.locator(".notice")).toContainText(/已归档 \d+ 位参与者、\d+ 支队伍，并重置当前活动/);
+  await expect(page.getByText("最近归档", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/admin$/);
+
+  await page.getByRole("button", { name: "资源管理" }).click();
+  await expect(page.locator(".admin-metrics")).toContainText("总计 0 · 已发 0");
+  const participantContext = await browser.newContext();
+  const participantPage = await participantContext.newPage();
+  await participantPage.goto(`/?acceptanceClient=${clientId}`);
+  await expect(participantPage.getByLabel("昵称", { exact: true })).toBeVisible();
+  await expect(participantPage.getByText(`归档验收${stamp}`)).toHaveCount(0);
+  await participantContext.close();
 });

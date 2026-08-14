@@ -74,3 +74,22 @@ test("Lightsail static assets expose the same mobile entry page and reject path 
   const blocked = await assets.fetch(new Request("http://localhost/%2e%2e%2fpackage.json"));
   assert.equal(blocked.status, 404);
 });
+
+test("Lightsail serializes a burst of concurrent participant registrations without losing request bodies", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "agentic-football-concurrency-"));
+  const databasePath = join(temporary, "event.db");
+  try {
+    const worker = await eventWorker(); const database = new SqliteD1(databasePath);
+    const registrations = await Promise.all(Array.from({ length: 20 }, (_, index) => call(worker, database, "/api/participants", {
+      method: "POST", client: `burst-phone-${index}`, body: { nickname: `并发参与者${index}`, supportProfile: {} },
+    })));
+    assert.equal(registrations.every(({ response }) => response.status === 200), true, registrations.map(({ response, data }) => `${response.status}:${data.error || "ok"}`).join(","));
+    const login = await call(worker, database, "/api/ops/session", { method: "POST", body: { staffPin: "lightsail-staff", staffNickname: "并发核对" } });
+    const state = await call(worker, database, "/api/ops/state", { staff: login.data.staffSession });
+    assert.equal(state.data.participants.length, 20);
+    assert.equal(new Set(state.data.participants.map((participant) => participant.nickname)).size, 20);
+    database.close();
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});

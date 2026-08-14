@@ -255,7 +255,6 @@
 .staff-shell .next-action button,
 .staff-shell .compact-list article > button,
 .staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button),
-.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button),
 .staff-shell .dispatch-modal .confirm-dispatch,
 .staff-shell .dispatch-modal .team-resource-card .resource-actions > button:not(.secondary),
 .staff-shell .dispatch-modal .modal-section > button:not(.secondary):not(.text-button),
@@ -273,8 +272,6 @@
 .staff-shell .compact-list article > button:focus-visible:not(:disabled),
 .staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button):hover:not(:disabled),
 .staff-shell .selection-tray > div:last-child > button:not(.secondary):not(.text-button):focus-visible:not(:disabled),
-.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button):hover:not(:disabled),
-.staff-shell .scan-result .button-row > button:not(.secondary):not(.text-button):focus-visible:not(:disabled),
 .staff-shell .dispatch-modal .confirm-dispatch:hover:not(:disabled),
 .staff-shell .dispatch-modal .confirm-dispatch:focus-visible:not(:disabled),
 .staff-shell .dispatch-modal .team-resource-card .resource-actions > button:not(.secondary):hover:not(:disabled),
@@ -540,9 +537,7 @@
   outline-offset: 1px;
 }
 
-.staff-shell .team-resource-card,
-.staff-shell .scan-result,
-.staff-shell .scanner-panel {
+.staff-shell .team-resource-card {
   border: 2px solid var(--ops-ink);
   border-radius: 5px;
   background: #edf4df;
