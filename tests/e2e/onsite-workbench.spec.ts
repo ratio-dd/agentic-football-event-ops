@@ -140,6 +140,71 @@ test("public display is readable without Staff controls", async ({ page }) => {
   await expect(page.getByText("工作台 PIN")).toHaveCount(0);
 });
 
+test("public display switches to a 16-team knockout progression without creating later rounds", async ({ page }, testInfo) => {
+  const knockoutMatches = Array.from({ length: 8 }, (_, index) => {
+    const teamALabel = `T-${String(index + 1).padStart(3, "0")}`;
+    const teamBLabel = `T-${String(16 - index).padStart(3, "0")}`;
+    const completed = index < 2;
+    return {
+      id: `round-1-match-${index + 1}`,
+      stage: "knockout",
+      round: 1,
+      teamALabel,
+      teamBLabel,
+      status: completed ? "completed" : "ready",
+      scoreA: completed ? 2 : null,
+      scoreB: completed ? 1 : null,
+      winnerLabel: completed ? teamALabel : "待定",
+    };
+  });
+  await page.route("**/api/display", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        event: { name: "Agentic Football 现场运营台" },
+        tournament: {
+          status: "knockout",
+          currentGroupRound: 3,
+          totalGroupRounds: 3,
+          currentKnockoutRound: 1,
+          totalKnockoutRounds: 4,
+          groups: [],
+          matches: [],
+          // Only round one exists in business data. The later cards rendered
+          // by the display are presentation placeholders, not match records.
+          knockoutMatches,
+        },
+      }),
+    });
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/display");
+  const bracketButton = page.getByRole("button", { name: "淘汰赛对阵图" });
+  await expect(bracketButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".knockout-stage")).toBeVisible();
+  const bracket = page.locator(".knockout-bracket-svg");
+  await expect(bracket.getByText("1/8 决赛", { exact: true })).toBeVisible();
+  await expect(bracket.getByText("1/4 决赛", { exact: true })).toBeVisible();
+  await expect(bracket.getByText("半决赛", { exact: true })).toBeVisible();
+  await expect(bracket.getByText("决赛", { exact: true })).toBeVisible();
+  await expect(page.locator(".knockout-champion")).toContainText("冠军");
+  await expect(bracket).toContainText("T-001");
+  await expect(bracket).toContainText("T-016");
+  await expect(page.locator(".knockout-match-card")).toHaveCount(15);
+  await expect(page.locator(".knockout-match-card.is-future")).toHaveCount(7);
+  await expect(page.getByText("后续轮次由 Admin 手动开放", { exact: false })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("public-display-knockout-bracket.png"), fullPage: false });
+
+  const overviewButton = page.getByRole("button", { name: "现场进程" });
+  await overviewButton.click();
+  await expect(overviewButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".knockout-stage")).toHaveCount(0);
+  await expect(page.getByText("下一场", { exact: true })).toBeVisible();
+  await bracketButton.click();
+  await expect(page.locator(".knockout-stage")).toBeVisible();
+});
+
 test("Staff can elevate to Admin from the More menu without a second Staff login", async ({ page }) => {
   await page.goto("/staff");
   await page.getByLabel("工作台 PIN").fill("meetup-staff");

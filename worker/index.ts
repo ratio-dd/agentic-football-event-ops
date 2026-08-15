@@ -303,9 +303,9 @@ async function publicMaintenanceSnapshot(env: Env) {
     resources: { gamePortal: codeRows(state.gamePortalCodes) },
   };
 }
-async function displayView(env: Env) { const { state } = await stateOf(env.DB); return { event: state.event, tournament: publicTournament(state, true) }; }
+async function displayView(env: Env) { const { state } = await stateOf(env.DB); return { event: state.event, tournament: publicTournament(state, true, false) }; }
 async function participantSearch(env: Env, q: string) { const { state } = await stateOf(env.DB); const key = q.trim().toLowerCase(); const numberKey = key.replace(/^p[-\s]?/, "").replace(/^0+/, ""); const participants = state.participants.filter((p: any) => { const number = p.staffShortId.toLowerCase().replace(/^p-?0*/, ""); return !key || p.nickname.toLowerCase().includes(key) || p.staffShortId.toLowerCase().includes(key) || (Boolean(numberKey) && number.includes(numberKey)); }).sort((a: any, b: any) => Number(b.staffShortId.toLowerCase() === key) - Number(a.staffShortId.toLowerCase() === key) || Number(b.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey) - Number(a.staffShortId.toLowerCase().replace(/^p-?0*/, "") === numberKey)).slice(0, 8).map((p: any) => ({ id: p.id, nickname: p.nickname, staffShortId: p.staffShortId, teamId: p.teamId, supportProfile: p.supportProfile })); return { participants }; }
-function publicTournament(s: State, currentGroupRoundOnly = false) {
+function publicTournament(s: State, currentGroupRoundOnly = false, currentKnockoutRoundOnly = currentGroupRoundOnly) {
   if (!s.tournament) return null;
   // A team keeps its event-wide identity through the whole tournament. Group
   // letters describe a group, not a replacement name for the team.
@@ -318,7 +318,7 @@ function publicTournament(s: State, currentGroupRoundOnly = false) {
       standings: standings(s, tournament, group).map((row: any) => ({ ...row, label: label(row.teamId) })),
     })),
     matches: tournament.matches.filter((m: any) => !currentGroupRoundOnly || (Number(m.round) || 1) === tournament.currentGroupRound).map((m: any) => ({ ...m, teamALabel: label(m.teamAId), teamBLabel: label(m.teamBId) })),
-    knockoutMatches: (tournament.knockoutMatches || []).filter((m: any) => !currentGroupRoundOnly || (Number(m.round) || 1) === (Number(tournament.currentKnockoutRound) || 1)).map((m: any) => ({ ...m, teamALabel: label(m.teamAId), teamBLabel: label(m.teamBId), winnerLabel: label(m.winnerId) })),
+    knockoutMatches: (tournament.knockoutMatches || []).filter((m: any) => !currentKnockoutRoundOnly || (Number(m.round) || 1) === (Number(tournament.currentKnockoutRound) || 1)).map((m: any) => ({ ...m, teamALabel: label(m.teamAId), teamBLabel: label(m.teamBId), winnerLabel: label(m.winnerId) })),
   };
 }
 function groupFixtures(groups: any[]) {

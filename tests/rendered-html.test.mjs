@@ -173,6 +173,18 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.match(await read("public/display.js"), /下一场/);
 });
 
+test("public display provides a switchable Team-number knockout progression view", async () => {
+  const [display, css] = await Promise.all([read("public/display.js"), read("public/styles.css")]);
+  assert.match(display, /现场进程/);
+  assert.match(display, /淘汰赛对阵图/);
+  assert.match(display, /1\/8 决赛/);
+  assert.match(display, /等待晋级/);
+  assert.match(display, /后续轮次由 Admin 手动开放/);
+  assert.match(display, /knockout-connector/);
+  assert.match(css, /knockout-bracket-viewport/);
+  assert.match(css, /knockout-champion-code/);
+});
+
 test("shared deployment fails closed without configured Staff and administrator credentials", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
   const noStaff = await worker.fetch(new Request("https://feedback.example/api/ops/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ staffPin: "anything", staffNickname: "测试" }) }), { DB: db, ASSETS: { fetch: async () => new Response("missing", { status: 404 }) } });
@@ -570,6 +582,9 @@ test("knockout creates and exposes each next round only after Admin advances it"
   assert.equal(second.data.tournament.currentKnockoutRound, 2);
   assert.equal(secondRound.length, 2);
   assert.equal(secondRound.every((match) => match.status === "ready"), true);
+  const publicDisplay = await call(worker, db, "/api/display");
+  assert.deepEqual([...new Set(publicDisplay.data.tournament.knockoutMatches.map((match) => match.round))], [1, 2]);
+  assert.equal(publicDisplay.data.tournament.knockoutMatches.filter((match) => match.round === 3).length, 0);
   const lockedPriorRound = await call(worker, db, `/api/ops/matches/${firstRound[0].id}/result`, { method: "POST", staff, body: { scoreA: 0, scoreB: 3 } });
   assert.equal(lockedPriorRound.response.status, 409);
   assert.match(lockedPriorRound.data.error, /轮次已锁定/);
