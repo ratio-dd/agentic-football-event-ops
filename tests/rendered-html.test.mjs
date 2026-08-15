@@ -88,6 +88,7 @@ test("onsite state machine keeps team assignment in the Staff workflow", async (
   assert.match(worker, /codeVisibleClientIds/);
   assert.match(worker, /qualificationStatus = "ta_qualified"/);
   assert.match(worker, /api\/admin\/session/);
+  assert.match(worker, /api\/ops\/competition\/knockout-entrants/);
   assert.match(worker, /需要管理后台权限/);
   assert.match(worker, /此环境尚未配置 Staff PIN/);
   assert.match(worker, /\/api\/teams\/self/);
@@ -598,6 +599,28 @@ test("knockout creates and exposes each next round only after Admin advances it"
   assert.equal(finalRoundResponse.data.tournament.currentKnockoutRound, 3);
   assert.equal(finalRound.length, 1);
   assert.equal(finalRound[0].status, "ready");
+});
+
+test("Admin can explicitly seed exactly eight frozen qualified teams into knockout", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1(); const registeredTeams = [];
+  for (let index = 1; index <= 9; index += 1) {
+    const registered = await call(worker, db, "/api/participants", { method: "POST", client: `explicit-ko-${index}`, body: { nickname: `显式八强${index}`, supportProfile: {} } });
+    registeredTeams.push(registered.data.team);
+  }
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "八强名单 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const raw = JSON.parse(db.row.data); raw.gamePortalCodes = raw.teams.map((team, index) => ({ id: `explicit-code-${index}`, code: `EXPLICIT-${index}`, status: "assigned", teamId: team.id })); raw.teams.forEach((team, index) => { team.gamePortalCodeId = raw.gamePortalCodes[index].id; team.status = "ta_qualified"; team.qualificationStatus = "ta_qualified"; }); db.row.data = JSON.stringify(raw);
+  const frozenTeams = registeredTeams.slice(0, 8); const frozen = await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds: frozenTeams.map((team) => team.id) } }); assert.equal(frozen.response.status, 200);
+  const grouped = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: {} }); assert.equal(grouped.response.status, 200); assert.ok(grouped.data.tournament.matches.some((match) => match.status !== "completed"));
+  const teamNumbers = frozenTeams.map((team) => team.teamNumber);
+
+  const denied = await call(worker, db, "/api/ops/competition/knockout-entrants", { method: "POST", staff, body: { teamNumbers } }); assert.equal(denied.response.status, 403);
+  const tooFew = await call(worker, db, "/api/ops/competition/knockout-entrants", { method: "POST", staff, admin, body: { teamNumbers: teamNumbers.slice(0, 7) } }); assert.equal(tooFew.response.status, 409); assert.match(tooFew.data.error, /恰好包含 8 支不同队伍/);
+  const duplicate = await call(worker, db, "/api/ops/competition/knockout-entrants", { method: "POST", staff, admin, body: { teamNumbers: [...teamNumbers.slice(0, 7), teamNumbers[0]] } }); assert.equal(duplicate.response.status, 409); assert.match(duplicate.data.error, /恰好包含 8 支不同队伍/);
+  const outsider = await call(worker, db, "/api/ops/competition/knockout-entrants", { method: "POST", staff, admin, body: { teamNumbers: [...teamNumbers.slice(0, 7), registeredTeams[8].teamNumber] } }); assert.equal(outsider.response.status, 409); assert.match(outsider.data.error, /当前冻结名单/);
+
+  const generated = await call(worker, db, "/api/ops/competition/knockout-entrants", { method: "POST", staff, admin, body: { teamNumbers } }); assert.equal(generated.response.status, 200); assert.deepEqual(generated.data.entrants, teamNumbers); assert.equal(generated.data.tournament.status, "knockout"); assert.equal(generated.data.tournament.currentKnockoutRound, 1); assert.equal(generated.data.tournament.totalKnockoutRounds, 3);
+  const firstRound = generated.data.tournament.knockoutMatches; assert.equal(firstRound.length, 4); assert.deepEqual(firstRound.map((match) => [match.teamALabel, match.teamBLabel]), [[teamNumbers[0], teamNumbers[7]], [teamNumbers[1], teamNumbers[6]], [teamNumbers[2], teamNumbers[5]], [teamNumbers[3], teamNumbers[4]]]); assert.ok(firstRound.every((match) => match.status === "ready"));
+  const stored = JSON.parse(db.row.data); assert.ok(stored.auditLog.some((entry) => entry.action === "tournament.knockout.explicit.generated" && entry.reason === teamNumbers.join(",")));
 });
 
 test("Admin archive reset requires the event name, preserves only the current sessions and archives all business data", async () => {

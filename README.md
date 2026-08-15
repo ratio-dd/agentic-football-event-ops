@@ -67,6 +67,14 @@ PORT=8787 STAFF_PINS='[{"id":"local-staff","pin":"replace-me","enabled":true}]' 
 
 默认本地数据库是 `.local-data/event.db`。不要把本地数据库、真实 PIN、官方 Code 或生产环境变量提交到仓库。
 
+### 显式写入八强名单
+
+现场赛果来自外部裁决或旧赛程时，Admin 可调用 `POST /api/ops/competition/knockout-entrants`，以 `teamNumbers` 按种子顺序提交恰好 8 支队伍。接口只接受当前冻结名单中已获资格的队伍；第 1 支对第 8 支、第 2 支对第 7 支，以此类推。该操作会立即锁定小组赛并生成八强赛，不接受部分名单。
+
+```json
+{ "teamNumbers": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008"] }
+```
+
 ## 测试
 
 ```bash
