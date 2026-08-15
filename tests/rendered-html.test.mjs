@@ -109,6 +109,8 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.doesNotMatch(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
   assert.match(participant, /Workshop 入口/);
+  assert.match(participant, /点击或复制 Workshop 链接到浏览器打开，输入邮箱获得一次性验证码进行 Workshop 注册。/);
+  assert.doesNotMatch(participant, /所有参与者使用同一个 Workshop 入口。/);
   assert.match(await read("worker/index.ts"), /f858-0a0594-2f/);
   assert.doesNotMatch(participant, /Workshop Code/);
   assert.match(participant, /competitionForTeam/);
