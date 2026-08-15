@@ -71,6 +71,8 @@ PORT=8787 STAFF_PINS='[{"id":"local-staff","pin":"replace-me","enabled":true}]' 
 
 现场赛果来自外部裁决或旧赛程时，Admin 可调用 `POST /api/ops/competition/knockout-entrants`，以 `teamNumbers` 按种子顺序提交恰好 8 支队伍。接口只接受当前冻结名单中已获资格的队伍；第 1 支对第 8 支、第 2 支对第 7 支，以此类推。该操作会立即锁定小组赛并生成八强赛，不接受部分名单。
 
+半决赛全部完成并由 Admin 开放下一轮后，系统会同时生成冠亚军决赛和三四名决赛：半决赛胜者进入冠亚军决赛，负者进入三四名决赛。
+
 ```json
 { "teamNumbers": ["T-001", "T-002", "T-003", "T-004", "T-005", "T-006", "T-007", "T-008"] }
 ```

@@ -7,6 +7,7 @@ let ticketFrameObserver;
 const ticketFrame = () => `<svg class="ticket-frame" aria-hidden="true" preserveAspectRatio="none"><path class="ticket-frame-shape"/></svg>`;
 
 function signed(value) { return Number(value) > 0 ? `+${value}` : String(value ?? 0); }
+function knockoutMatchLabel(match) { return match.placement === "final" ? "冠亚军决赛" : match.placement === "third_place" ? "三四名决赛" : `淘汰赛第 ${match.round} 轮`; }
 function competitionForTeam(team, tournament) {
   if (!team || team.qualificationStatus !== "ta_qualified") return "";
   if (!tournament) return "";
@@ -17,10 +18,10 @@ function competitionForTeam(team, tournament) {
   const describe = (match) => {
     const opponent = match.teamAId === team.id ? match.teamBLabel : match.teamALabel;
     const score = match.status === "completed" ? `${match.scoreA} : ${match.scoreB}` : match.status === "bye" ? "轮空晋级" : "待进行";
-    const stage = match.stage === "group" ? `${match.groupId} 组 · 第 ${match.round || 1} 轮` : `淘汰赛第 ${match.round} 轮`;
+    const stage = match.stage === "group" ? `${match.groupId} 组 · 第 ${match.round || 1} 轮` : knockoutMatchLabel(match);
     return `<li><div><small>${e(stage)}</small><strong>对阵 ${e(opponent)}</strong></div><em>${e(score)}</em></li>`;
   };
-  return `<section class="participant-ticket participant-schedule"><h2>比赛</h2>${standing ? `<div class="participant-standings"><article><span>${e(group.id)} 组</span><strong>积分 ${standing.points}</strong></article><article><span>已赛 ${standing.played}</span><strong>净胜球 ${signed(standing.goalDifference)}</strong></article></div>` : ""}${next ? `<p class="participant-next-match">下一场：${e(next.stage === "group" ? `${next.groupId} 组 · 第 ${next.round || 1} 轮` : `淘汰赛第 ${next.round} 轮`)} 对阵 ${e(next.teamAId === team.id ? next.teamBLabel : next.teamALabel)}</p>` : ""}<h3>我的赛程</h3><ul class="ticket-match-list">${matches.map(describe).join("") || "暂无比赛安排。"}</ul></section>`;
+  return `<section class="participant-ticket participant-schedule"><h2>比赛</h2>${standing ? `<div class="participant-standings"><article><span>${e(group.id)} 组</span><strong>积分 ${standing.points}</strong></article><article><span>已赛 ${standing.played}</span><strong>净胜球 ${signed(standing.goalDifference)}</strong></article></div>` : ""}${next ? `<p class="participant-next-match">下一场：${e(next.stage === "group" ? `${next.groupId} 组 · 第 ${next.round || 1} 轮` : knockoutMatchLabel(next))} 对阵 ${e(next.teamAId === team.id ? next.teamBLabel : next.teamALabel)}</p>` : ""}<h3>我的赛程</h3><ul class="ticket-match-list">${matches.map(describe).join("") || "暂无比赛安排。"}</ul></section>`;
 }
 
 function ticketFramePath(width, height) {

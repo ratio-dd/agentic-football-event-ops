@@ -181,6 +181,7 @@ test("public display provides a switchable Team-number knockout progression view
   assert.match(display, /1\/8 决赛/);
   assert.match(display, /等待晋级/);
   assert.match(display, /后续轮次由 Admin 手动开放/);
+  assert.match(display, /三四名决赛/);
   assert.match(display, /knockout-connector/);
   assert.match(css, /knockout-bracket-viewport/);
   assert.match(css, /knockout-champion-code/);
@@ -597,8 +598,17 @@ test("knockout creates and exposes each next round only after Admin advances it"
   const finalRound = finalRoundResponse.data.tournament.knockoutMatches.filter((match) => match.round === 3);
   assert.equal(finalRoundResponse.response.status, 200);
   assert.equal(finalRoundResponse.data.tournament.currentKnockoutRound, 3);
-  assert.equal(finalRound.length, 1);
-  assert.equal(finalRound[0].status, "ready");
+  assert.equal(finalRound.length, 2);
+  assert.equal(finalRound.every((match) => match.status === "ready"), true);
+  const championship = finalRound.find((match) => match.placement === "final");
+  const thirdPlace = finalRound.find((match) => match.placement === "third_place");
+  assert.ok(championship); assert.ok(thirdPlace);
+  assert.deepEqual([championship.teamALabel, championship.teamBLabel], [secondRound[0].teamALabel, secondRound[1].teamALabel]);
+  assert.deepEqual([thirdPlace.teamALabel, thirdPlace.teamBLabel], [secondRound[0].teamBLabel, secondRound[1].teamBLabel]);
+  assert.deepEqual([championship.sourceAOutcome, championship.sourceBOutcome], ["winner", "winner"]);
+  assert.deepEqual([thirdPlace.sourceAOutcome, thirdPlace.sourceBOutcome], ["loser", "loser"]);
+  const placementDisplay = await call(worker, db, "/api/display");
+  assert.equal(placementDisplay.data.tournament.knockoutMatches.filter((match) => match.round === 3).length, 2);
 });
 
 test("Admin can explicitly seed exactly eight frozen qualified teams into knockout", async () => {

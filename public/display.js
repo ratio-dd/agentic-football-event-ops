@@ -9,7 +9,7 @@ function standings(group) { return `<section class="display-group"><h2>${e(group
 
 function knockoutRoundLabel(round, totalRounds) {
   const entrants = 2 ** Math.max(1, totalRounds - round + 1);
-  if (entrants === 2) return "决赛";
+  if (entrants === 2) return "冠亚军决赛";
   if (entrants === 4) return "半决赛";
   if (entrants === 8) return "1/4 决赛";
   if (entrants === 16) return "1/8 决赛";
@@ -50,6 +50,7 @@ function knockoutCard(match, x, centerY, cardWidth, cardHeight, current) {
 
 function knockoutDiagram(tournament) {
   const matches = tournament.knockoutMatches || [];
+  const thirdPlaceMatch = matches.find((match) => match.placement === "third_place");
   const generatedRounds = matches.map((match) => Number(match.round) || 1);
   const totalRounds = Math.max(1, Number(tournament.totalKnockoutRounds) || 0, ...generatedRounds);
   const currentRound = Math.max(1, Number(tournament.currentKnockoutRound) || 1);
@@ -89,8 +90,11 @@ function knockoutDiagram(tournament) {
   const championTop = finalCenterY - 27;
   const currentMatches = matchesByRound[currentRound - 1] || [];
   const finished = currentMatches.filter((match) => ["completed", "bye"].includes(match.status)).length;
-  const expected = centers[currentRound - 1]?.length || currentMatches.length;
-  return `<section class="knockout-stage"><div class="knockout-stage-meta"><div><span>当前轮次</span><strong>${e(knockoutRoundLabel(currentRound, totalRounds))}</strong></div><p>${finished} / ${expected} 场已结束 · 后续轮次由 Admin 手动开放</p></div><div class="knockout-bracket-viewport" tabindex="0" aria-label="淘汰赛晋级图，可横向滚动"><svg class="knockout-bracket-svg" viewBox="0 0 ${boardWidth} ${boardHeight}" width="${boardWidth}" height="${boardHeight}" role="img" aria-labelledby="knockout-bracket-title"><title id="knockout-bracket-title">从 ${e(knockoutRoundLabel(1, totalRounds))} 到冠军的淘汰赛晋级图</title>${lanes}<g class="knockout-lines">${connectors.join("")}</g>${cards}<g class="knockout-champion"><text class="knockout-round-title" x="${championX + cardWidth / 2}" y="${headingY}" text-anchor="middle">冠军</text><rect class="knockout-champion-bg" x="${championX}" y="${championTop}" width="${cardWidth}" height="54" rx="12"/><text class="knockout-champion-code" x="${championX + cardWidth / 2}" y="${finalCenterY + 7}" text-anchor="middle">${e(championLabel)}</text></g></svg></div></section>`;
+  const expected = currentMatches.length || centers[currentRound - 1]?.length || 0;
+  const currentLabel = currentRound === totalRounds && thirdPlaceMatch ? "冠亚军与三四名决赛" : knockoutRoundLabel(currentRound, totalRounds);
+  const thirdPlaceScore = thirdPlaceMatch?.status === "completed" ? `${thirdPlaceMatch.scoreA} : ${thirdPlaceMatch.scoreB}` : "待进行";
+  const thirdPlace = thirdPlaceMatch ? `<aside class="knockout-placement-card"><div><span>三四名决赛</span><strong>${e(teamCode(thirdPlaceMatch.teamALabel))} vs ${e(teamCode(thirdPlaceMatch.teamBLabel))}</strong></div><small>${e(thirdPlaceScore)}</small></aside>` : "";
+  return `<section class="knockout-stage"><div class="knockout-stage-meta"><div><span>当前轮次</span><strong>${e(currentLabel)}</strong></div><p>${finished} / ${expected} 场已结束 · 后续轮次由 Admin 手动开放</p></div>${thirdPlace}<div class="knockout-bracket-viewport" tabindex="0" aria-label="淘汰赛晋级图，可横向滚动"><svg class="knockout-bracket-svg" viewBox="0 0 ${boardWidth} ${boardHeight}" width="${boardWidth}" height="${boardHeight}" role="img" aria-labelledby="knockout-bracket-title"><title id="knockout-bracket-title">从 ${e(knockoutRoundLabel(1, totalRounds))} 到冠军的淘汰赛晋级图</title>${lanes}<g class="knockout-lines">${connectors.join("")}</g>${cards}<g class="knockout-champion"><text class="knockout-round-title" x="${championX + cardWidth / 2}" y="${headingY}" text-anchor="middle">冠军</text><rect class="knockout-champion-bg" x="${championX}" y="${championTop}" width="${cardWidth}" height="54" rx="12"/><text class="knockout-champion-code" x="${championX + cardWidth / 2}" y="${finalCenterY + 7}" text-anchor="middle">${e(championLabel)}</text></g></svg></div></section>`;
 }
 
 function render(data) {

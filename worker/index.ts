@@ -725,11 +725,17 @@ function resolveKnockout(tournament: any) {
     matches.forEach((m: any) => {
       const sourceA = m.sourceAId ? matches.find((candidate: any) => candidate.id === m.sourceAId) : null;
       const sourceB = m.sourceBId ? matches.find((candidate: any) => candidate.id === m.sourceBId) : null;
-      if (sourceA?.winnerId && m.teamAId !== sourceA.winnerId) { m.teamAId = sourceA.winnerId; changed = true; }
-      if (sourceB?.winnerId && m.teamBId !== sourceB.winnerId) { m.teamBId = sourceB.winnerId; changed = true; }
+      const outcomeTeam = (source: any, outcome: string) => {
+        if (!source?.winnerId) return null;
+        if (outcome === "loser") return [source.teamAId, source.teamBId].find((teamId) => teamId && teamId !== source.winnerId) || null;
+        return source.winnerId;
+      };
+      const sourceATeam = outcomeTeam(sourceA, m.sourceAOutcome || "winner"); const sourceBTeam = outcomeTeam(sourceB, m.sourceBOutcome || "winner");
+      if (sourceATeam && m.teamAId !== sourceATeam) { m.teamAId = sourceATeam; changed = true; }
+      if (sourceBTeam && m.teamBId !== sourceBTeam) { m.teamBId = sourceBTeam; changed = true; }
       // A downstream match can receive its two winners at different times.
       // Do not declare a bye until both source matches have resolved.
-      const sourcesResolved = (!m.sourceAId || Boolean(sourceA?.winnerId)) && (!m.sourceBId || Boolean(sourceB?.winnerId));
+      const sourcesResolved = (!m.sourceAId || Boolean(sourceATeam)) && (!m.sourceBId || Boolean(sourceBTeam));
       if (!sourcesResolved || m.winnerId) return;
       if (m.teamAId && m.teamBId && m.status === "pending") { m.status = "ready"; changed = true; }
       if ((m.teamAId || m.teamBId) && !(m.teamAId && m.teamBId)) { m.winnerId = m.teamAId || m.teamBId; m.status = "bye"; changed = true; }
@@ -776,7 +782,13 @@ function advanceKnockoutRound(s: State, actor: Staff) {
   const nextRound = current + 1; let nextMatches = tournament.knockoutMatches.filter((match: any) => (Number(match.round) || 1) === nextRound);
   if (!nextMatches.length) {
     nextMatches = [];
-    for (let index = 0; index < currentMatches.length; index += 2) nextMatches.push({ id: id(), stage: "knockout", round: nextRound, teamAId: null, teamBId: null, sourceAId: currentMatches[index].id, sourceBId: currentMatches[index + 1]?.id || null, status: "pending", scoreA: null, scoreB: null, winnerId: null });
+    const placementRound = nextRound === total && currentMatches.length === 2;
+    if (placementRound) {
+      nextMatches.push({ id: id(), stage: "knockout", round: nextRound, placement: "final", teamAId: null, teamBId: null, sourceAId: currentMatches[0].id, sourceBId: currentMatches[1].id, sourceAOutcome: "winner", sourceBOutcome: "winner", status: "pending", scoreA: null, scoreB: null, winnerId: null });
+      if (currentMatches.every((match: any) => match.teamAId && match.teamBId)) nextMatches.push({ id: id(), stage: "knockout", round: nextRound, placement: "third_place", teamAId: null, teamBId: null, sourceAId: currentMatches[0].id, sourceBId: currentMatches[1].id, sourceAOutcome: "loser", sourceBOutcome: "loser", status: "pending", scoreA: null, scoreB: null, winnerId: null });
+    } else {
+      for (let index = 0; index < currentMatches.length; index += 2) nextMatches.push({ id: id(), stage: "knockout", round: nextRound, teamAId: null, teamBId: null, sourceAId: currentMatches[index].id, sourceBId: currentMatches[index + 1]?.id || null, status: "pending", scoreA: null, scoreB: null, winnerId: null });
+    }
     tournament.knockoutMatches.push(...nextMatches);
   }
   tournament.currentKnockoutRound = nextRound; resolveKnockout(tournament);

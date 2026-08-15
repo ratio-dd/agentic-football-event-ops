@@ -187,7 +187,7 @@ test("public display switches to a 16-team knockout progression without creating
   await expect(bracket.getByText("1/8 决赛", { exact: true })).toBeVisible();
   await expect(bracket.getByText("1/4 决赛", { exact: true })).toBeVisible();
   await expect(bracket.getByText("半决赛", { exact: true })).toBeVisible();
-  await expect(bracket.getByText("决赛", { exact: true })).toBeVisible();
+  await expect(bracket.getByText("冠亚军决赛", { exact: true })).toBeVisible();
   await expect(page.locator(".knockout-champion")).toContainText("冠军");
   await expect(bracket).toContainText("T-001");
   await expect(bracket).toContainText("T-016");
