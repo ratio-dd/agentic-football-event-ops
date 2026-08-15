@@ -5,7 +5,7 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const TEST_ENV = { STAFF_PINS: JSON.stringify([{ id: "test-staff", pin: "test-staff", enabled: true }]), ADMIN_PIN: "test-admin" };
-const resourceCodes = (codes) => ({ workshopCodes: codes, gamePortalCodes: codes.map((code) => `PORTAL-${code}`) });
+const resourceCodes = (codes) => ({ gamePortalCodes: codes.map((code) => `PORTAL-${code}`) });
 
 class MemoryD1 {
   row = null;
@@ -108,6 +108,9 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.doesNotMatch(participant, /创建一个队伍/);
   assert.doesNotMatch(participant, /加入队友的队伍/);
   assert.match(participant, /Game Portal/);
+  assert.match(participant, /Workshop 入口/);
+  assert.match(await read("worker/index.ts"), /f858-0a0594-2f/);
+  assert.doesNotMatch(participant, /Workshop Code/);
   assert.match(participant, /competitionForTeam/);
   assert.match(participant, /净胜球/);
   assert.doesNotMatch(participant, /officialLabel/);
@@ -132,10 +135,10 @@ test("mobile participant and staff surfaces match the on-site workflow", async (
   assert.doesNotMatch(staff, /生成自动分配预览/);
   assert.match(staff, /data-detail-key/);
   assert.match(staff, /team-board-search/);
-  assert.match(staff, /Workshop Code：\$\{team\.workshopCode/);
+  assert.match(staff, /Game Portal Code：\$\{team\.gamePortalCode/);
   assert.match(staff, /team-status-override/);
   assert.match(staff, /copy-team-code/);
-  assert.match(staff, /data-code-kind="Workshop Team Code"/);
+  assert.doesNotMatch(staff, /data-code-kind="Workshop Team Code"/);
   assert.match(staff, /data-code-kind="Game Portal Code"/);
   assert.match(staff, /competition-group-filter/);
   assert.match(staff, /data-draft-scope="match:/);
@@ -192,10 +195,10 @@ test("admin diagnostics reports resource bindings without exposing code values",
   await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(["DIAG-WORKSHOP"]) });
   const denied = await call(worker, db, "/api/admin/diagnostics", { staff }); assert.equal(denied.response.status, 403);
   const before = await call(worker, db, "/api/admin/diagnostics", { staff, admin });
-  assert.equal(before.response.status, 200); assert.equal(before.data.activeTeams, 1); assert.deepEqual(before.data.workshop.activeTeamsMissingCode, [team.data.team.teamNumber]); assert.equal(JSON.stringify(before.data).includes("DIAG-WORKSHOP"), false);
+  assert.equal(before.response.status, 200); assert.equal(before.data.activeTeams, 1); assert.deepEqual(before.data.gamePortal.activeTeamsMissingCode, [team.data.team.teamNumber]); assert.equal(JSON.stringify(before.data).includes("DIAG-WORKSHOP"), false);
   await call(worker, db, `/api/ops/teams/${team.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   const after = await call(worker, db, "/api/admin/diagnostics", { staff, admin });
-  assert.deepEqual(after.data.workshop.activeTeamsMissingCode, []); assert.equal(after.data.workshop.assigned, 1); assert.equal(after.data.integrity, "ok");
+  assert.deepEqual(after.data.gamePortal.activeTeamsMissingCode, []); assert.equal(after.data.gamePortal.assigned, 1); assert.equal(after.data.integrity, "ok");
 });
 
 test("temporary public maintenance snapshot can be disabled by an administrator", async () => {
@@ -206,7 +209,7 @@ test("temporary public maintenance snapshot can be disabled by an administrator"
   await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: resourceCodes(["VISIBLE-WORKSHOP"]) });
   await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   const visible = await call(worker, db, "/api/maintenance/snapshot");
-  assert.equal(visible.response.status, 200); assert.equal(visible.data.temporary, true); assert.equal(visible.data.teams[0].workshopCode, "VISIBLE-WORKSHOP");
+  assert.equal(visible.response.status, 200); assert.equal(visible.data.temporary, true); assert.equal(visible.data.teams[0].gamePortalCode, "PORTAL-VISIBLE-WORKSHOP"); assert.equal("workshopCode" in visible.data.teams[0], false);
   await call(worker, db, "/api/ops/event-gates", { method: "PUT", staff, admin, body: { gates: { publicMaintenanceSnapshot: false } } });
   const closed = await call(worker, db, "/api/maintenance/snapshot");
   assert.equal(closed.response.status, 404);
@@ -230,37 +233,38 @@ test("registration immediately creates a confirmed solo team", async () => {
   assert.equal(state.data.event.maxWorkshopTeams, 32);
 });
 
-test("Admin batch issuance is atomic and Staff can see both assigned codes", async () => {
+test("Admin batch issuance is atomic and Staff can see each assigned Game Portal Code", async () => {
   const worker = await eventWorker(); const db = new MemoryD1(); const registrations = [];
   for (let index = 1; index <= 3; index += 1) registrations.push(await call(worker, db, "/api/participants", { method: "POST", client: `batch-${index}`, body: { nickname: `批量队${index}`, supportProfile: {} } }));
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "批量 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
   const teamIds = registrations.map((item) => item.data.team.id);
-  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes: ["BW-1", "BW-2", "BW-3"], gamePortalCodes: ["BG-1", "BG-2"] } });
+  await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["BG-1", "BG-2"] } });
   const rejected = await call(worker, db, "/api/ops/codes/batch-issue", { method: "POST", staff, admin, body: { teamIds } });
   assert.equal(rejected.response.status, 409); assert.match(rejected.data.error, /库存不足.*Game Portal 1 个/);
   const unchanged = await call(worker, db, "/api/ops/state", { staff });
-  assert.equal(unchanged.data.teams.filter((team) => team.resourceCodesAssigned).length, 0);
+  assert.equal(unchanged.data.teams.filter((team) => team.gamePortalCodeAssigned).length, 0);
   await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["BG-1", "BG-2", "BG-3"] } });
   const issued = await call(worker, db, "/api/ops/codes/batch-issue", { method: "POST", staff, admin, body: { teamIds } });
   assert.equal(issued.response.status, 200); assert.equal(issued.data.assigned, 3);
   const staffView = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffView.data.teams.filter((team) => teamIds.includes(team.id)).map((team) => [team.workshopCode, team.gamePortalCode]), [["BW-1", "BG-1"], ["BW-2", "BG-2"], ["BW-3", "BG-3"]]);
+  assert.deepEqual(staffView.data.teams.filter((team) => teamIds.includes(team.id)).map((team) => team.gamePortalCode), ["BG-1", "BG-2", "BG-3"]);
+  assert.ok(staffView.data.teams.every((team) => !("workshopCode" in team) && !("workshopCodeId" in team)));
 });
 
 test("Code imports append unique inventory after issuance and keep summary counts stable", async () => {
   const worker = await eventWorker(); const db = new MemoryD1(); const registrations = [];
   for (let index = 1; index <= 2; index += 1) registrations.push(await call(worker, db, "/api/participants", { method: "POST", client: `append-${index}`, body: { nickname: `追加队${index}`, supportProfile: {} } }));
   const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "追加 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
-  const first = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes: ["AW-1", "AW-1", "AW-2"], gamePortalCodes: ["AG-1", "AG-1", "AG-2"] } });
+  const first = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["AG-1", "AG-1", "AG-2"] } });
   assert.equal(first.response.status, 200);
-  assert.deepEqual(first.data.imported, { workshop: { submitted: 3, added: 2, duplicates: 1 }, gamePortal: { submitted: 3, added: 2, duplicates: 1 } });
+  assert.deepEqual(first.data.imported, { gamePortal: { submitted: 3, added: 2, duplicates: 1 } });
   await call(worker, db, `/api/ops/teams/${registrations[0].data.team.id}/issue-code`, { method: "POST", staff, body: {} });
-  const appended = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes: ["AW-2", "AW-3"], gamePortalCodes: ["AG-2", "AG-3"] } });
+  const appended = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["AG-2", "AG-3"] } });
   assert.equal(appended.response.status, 200);
-  assert.deepEqual(appended.data.imported, { workshop: { submitted: 2, added: 1, duplicates: 1 }, gamePortal: { submitted: 2, added: 1, duplicates: 1 } });
-  assert.deepEqual(appended.data.codeSummary, { workshop: { total: 3, available: 2, issued: 1 }, gamePortal: { total: 3, available: 2, issued: 1 }, pairsAvailable: 2, pairsIssued: 1 });
+  assert.deepEqual(appended.data.imported, { gamePortal: { submitted: 2, added: 1, duplicates: 1 } });
+  assert.deepEqual(appended.data.codeSummary, { gamePortal: { total: 3, available: 2, issued: 1 } });
   const state = await call(worker, db, "/api/ops/state", { staff }); const issuedTeam = state.data.teams.find((team) => team.id === registrations[0].data.team.id);
-  assert.equal(issuedTeam.workshopCode, "AW-1"); assert.equal(issuedTeam.gamePortalCode, "AG-1");
+  assert.equal(issuedTeam.gamePortalCode, "AG-1"); assert.equal("workshopCode" in issuedTeam, false);
 });
 
 test("every roster size from 4 through 32 generates balanced dynamic groups", async () => {
@@ -272,7 +276,7 @@ test("every roster size from 4 through 32 generates balanced dynamic groups", as
       teamIds.push(registered.data.team.id);
     }
     const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "矩阵 Admin" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
-    const raw = JSON.parse(db.row.data); raw.teams.forEach((team) => { team.status = "ta_qualified"; team.qualificationStatus = "ta_qualified"; }); db.row.data = JSON.stringify(raw);
+    const raw = JSON.parse(db.row.data); raw.gamePortalCodes = raw.teams.map((team, index) => ({ id: `matrix-code-${count}-${index}`, code: `MATRIX-${count}-${index}`, status: "assigned", teamId: team.id })); raw.teams.forEach((team, index) => { team.gamePortalCodeId = raw.gamePortalCodes[index].id; team.status = "ta_qualified"; team.qualificationStatus = "ta_qualified"; }); db.row.data = JSON.stringify(raw);
     const frozen = await call(worker, db, "/api/ops/competition/freeze", { method: "POST", staff, admin, body: { teamIds } }); assert.equal(frozen.response.status, 200, `${count} 支应可冻结`);
     const generated = await call(worker, db, "/api/ops/competition/generate", { method: "POST", staff, admin, body: { groupCount: 99, qualifiersPerGroup: 99 } });
     assert.equal(generated.response.status, 200, `${count} 支应可生成`);
@@ -286,49 +290,64 @@ test("every roster size from 4 through 32 generates balanced dynamic groups", as
   }
 });
 
-test("Workshop Code can be imported and issued before Game Portal Code arrives", async () => {
+test("the shared Workshop URL is immediately available and only Game Portal Code is issued per team", async () => {
   const worker = await eventWorker(); const db = new MemoryD1();
-  const first = await call(worker, db, "/api/participants", { method: "POST", client: "pair-code-a", body: { nickname: "双码甲", supportProfile: {} } });
-  const second = await call(worker, db, "/api/participants", { method: "POST", client: "pair-code-b", body: { nickname: "双码乙", supportProfile: {} } });
-  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "双码 TA" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
-  const created = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [first.data.participant.id] } });
-  await call(worker, db, `/api/ops/teams/${created.data.team.id}/confirm`, { method: "POST", staff, body: {} });
-  const imported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes: ["WORKSHOP-001", "WORKSHOP-002"] } });
+  const first = await call(worker, db, "/api/participants", { method: "POST", client: "single-code-a", body: { nickname: "单码甲", supportProfile: {} } });
+  const second = await call(worker, db, "/api/participants", { method: "POST", client: "single-code-b", body: { nickname: "单码乙", supportProfile: {} } });
+  const firstPublic = await call(worker, db, "/api/state", { client: "single-code-a" });
+  assert.equal(firstPublic.data.event.workshopUrl, "https://catalog.us-east-1.prod.workshops.aws/join?access-code=f858-0a0594-2f");
+  assert.equal(firstPublic.data.currentTeam.gamePortalCode, null);
+  assert.equal("workshopCode" in firstPublic.data.currentTeam, false);
+  const login = await call(worker, db, "/api/ops/session", { method: "POST", body: { staffPin: "test-staff", staffNickname: "单码 TA" } }); const staff = login.data.staffSession; const admin = await elevate(worker, db, staff);
+  const rejectedLegacyImport = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes: ["REMOVED-001"] } });
+  assert.equal(rejectedLegacyImport.response.status, 400);
+  const noInventory = await call(worker, db, `/api/ops/teams/${first.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  assert.equal(noInventory.response.status, 409); assert.match(noInventory.data.error, /Game Portal Code/);
+  const imported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes: ["PORTAL-001", "PORTAL-002"] } });
   assert.equal(imported.response.status, 200);
-  const issued = await call(worker, db, `/api/ops/teams/${created.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const issued = await call(worker, db, `/api/ops/teams/${first.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issued.response.status, 200);
-  const qualifiedManually = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
+  const qualifiedManually = await call(worker, db, `/api/ops/teams/${first.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
   assert.equal(qualifiedManually.response.status, 200);
   assert.equal(qualifiedManually.data.team.status, "ta_qualified");
-  const restoredToWorkshop = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "issued" } });
+  const restoredToWorkshop = await call(worker, db, `/api/ops/teams/${first.data.team.id}/status`, { method: "PUT", staff, body: { status: "issued" } });
   assert.equal(restoredToWorkshop.response.status, 200);
   assert.equal(restoredToWorkshop.data.team.status, "issued");
   const closedRaw = JSON.parse(db.row.data); closedRaw.event.gates.qualification = false; db.row.data = JSON.stringify(closedRaw);
-  const blockedQualification = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
+  const blockedQualification = await call(worker, db, `/api/ops/teams/${first.data.team.id}/status`, { method: "PUT", staff, body: { status: "ta_qualified" } });
   assert.equal(blockedQualification.response.status, 409);
   assert.match(blockedQualification.data.error, /参赛资格确认已关闭/);
   const reopenedRaw = JSON.parse(db.row.data); reopenedRaw.event.gates.qualification = true; db.row.data = JSON.stringify(reopenedRaw);
-  const cannotReturnToCodeQueue = await call(worker, db, `/api/ops/teams/${created.data.team.id}/status`, { method: "PUT", staff, body: { status: "ready_code" } });
+  const cannotReturnToCodeQueue = await call(worker, db, `/api/ops/teams/${first.data.team.id}/status`, { method: "PUT", staff, body: { status: "ready_code" } });
   assert.equal(cannotReturnToCodeQueue.response.status, 409);
-  const afterFirst = await call(worker, db, "/api/state", { client: "pair-code-a" });
-  assert.equal(afterFirst.data.currentTeam.workshopCode, "WORKSHOP-001");
-  assert.equal(afterFirst.data.currentTeam.gamePortalCode, null);
-  const secondTeam = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [second.data.participant.id] } });
-  await call(worker, db, `/api/ops/teams/${secondTeam.data.team.id}/confirm`, { method: "POST", staff, body: {} });
-  const issuedSecond = await call(worker, db, `/api/ops/teams/${secondTeam.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
+  const afterFirst = await call(worker, db, "/api/state", { client: "single-code-a" });
+  assert.equal(afterFirst.data.currentTeam.gamePortalCode, "PORTAL-001");
+  const issuedSecond = await call(worker, db, `/api/ops/teams/${second.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issuedSecond.response.status, 200);
-  const gamePortalCodes = Array.from({ length: 34 }, (_, index) => `PORTAL-${String(index + 1).padStart(3, "0")}`);
-  const gameImported = await call(worker, db, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes } });
-  assert.equal(gameImported.response.status, 200);
-  const portalIssued = await call(worker, db, "/api/admin/codes/game-portal/backfill", { method: "POST", staff, admin, body: {} });
-  assert.equal(portalIssued.response.status, 200);
-  assert.equal(portalIssued.data.assigned, 2);
-  const portalView = await call(worker, db, "/api/state", { client: "pair-code-a" });
-  assert.equal(portalView.data.currentTeam.gamePortalCode, "PORTAL-001");
-  const secondPortalView = await call(worker, db, "/api/state", { client: "pair-code-b" });
+  const secondPortalView = await call(worker, db, "/api/state", { client: "single-code-b" });
   assert.equal(secondPortalView.data.currentTeam.gamePortalCode, "PORTAL-002");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 34, available: 32, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
+  assert.deepEqual(staffState.data.codeSummary, { gamePortal: { total: 2, available: 0, issued: 2 } });
+});
+
+test("legacy Workshop Code inventory is removed while the shared Workshop URL migrates once", async () => {
+  const worker = await eventWorker(); const db = new MemoryD1();
+  const registered = await call(worker, db, "/api/participants", { method: "POST", client: "legacy-workshop-code", body: { nickname: "旧资源迁移", supportProfile: {} } });
+  const raw = JSON.parse(db.row.data);
+  delete raw.event.workshopAccessVersion; raw.event.workshopUrl = "https://old.example/workshop";
+  raw.workshopCodes = [{ id: "legacy-workshop", code: "REMOVED", status: "assigned", teamId: registered.data.team.id }];
+  raw.teams[0].workshopCodeId = "legacy-workshop"; raw.teams[0].status = "ta_qualified"; raw.teams[0].qualificationStatus = "ta_qualified"; raw.teams[0].codeIssuedAt = new Date().toISOString();
+  db.row.data = JSON.stringify(raw);
+
+  const migrated = await call(worker, db, "/api/state", { client: "legacy-workshop-code" });
+  assert.equal(migrated.data.event.workshopUrl, "https://catalog.us-east-1.prod.workshops.aws/join?access-code=f858-0a0594-2f");
+  assert.equal(migrated.data.currentTeam.status, "ready_code");
+  assert.equal(migrated.data.currentTeam.qualificationStatus, "not_qualified");
+  assert.equal("workshopCodeId" in migrated.data.currentTeam, false);
+  await call(worker, db, "/api/feedback", { method: "POST", client: "legacy-workshop-code", body: { note: "persist migration" } });
+  const persisted = JSON.parse(db.row.data);
+  assert.equal("workshopCodes" in persisted, false);
+  assert.equal("workshopCodeId" in persisted.teams[0], false);
 });
 
 test("staff can group people, issue an official code, and a rebound browser restores it", async () => {
@@ -349,22 +368,18 @@ test("staff can group people, issue an official code, and a rebound browser rest
   const issued = await call(worker, db, `/api/ops/teams/${teamId}/issue-code`, { method: "POST", staff, body: {} });
   assert.equal(issued.response.status, 200);
   const originalView = await call(worker, db, "/api/state", { client: "phone-a" });
-  assert.equal(originalView.data.currentTeam.teamCode, "OFFICIAL-001");
-  assert.equal(originalView.data.currentTeam.workshopCode, "OFFICIAL-001");
   assert.equal(originalView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-001");
+  assert.equal("workshopCode" in originalView.data.currentTeam, false);
   assert.equal(originalView.data.event.workshopUrl, "https://workshop.example/entry");
   const third = await call(worker, db, "/api/participants", { method: "POST", client: "phone-c", body: { nickname: "小西", supportProfile: {} } });
   const secondGroup = await call(worker, db, "/api/ops/teams", { method: "POST", staff, body: { memberIds: [third.data.participant.id] } });
   await call(worker, db, `/api/ops/teams/${secondGroup.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   const secondView = await call(worker, db, "/api/state", { client: "phone-c" });
-  assert.equal(secondView.data.currentTeam.teamCode, "OFFICIAL-002");
   assert.equal(secondView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-002");
   const staffState = await call(worker, db, "/api/ops/state", { staff });
-  assert.deepEqual(staffState.data.codeSummary, { workshop: { total: 2, available: 0, issued: 2 }, gamePortal: { total: 2, available: 0, issued: 2 }, pairsAvailable: 0, pairsIssued: 2 });
+  assert.deepEqual(staffState.data.codeSummary, { gamePortal: { total: 2, available: 0, issued: 2 } });
   await call(worker, db, "/api/participants/rebind", { method: "POST", client: "new-phone", body: { nickname: "阿北" } });
   const reboundView = await call(worker, db, "/api/state", { client: "new-phone" });
-  assert.equal(reboundView.data.currentTeam.teamCode, "OFFICIAL-001");
-  assert.equal(reboundView.data.currentTeam.workshopCode, "OFFICIAL-001");
   assert.equal(reboundView.data.currentTeam.gamePortalCode, "PORTAL-OFFICIAL-001");
 });
 
@@ -394,7 +409,7 @@ test("Staff dispatch is atomic: code visibility follows membership and Admin rec
   await call(worker, db, `/api/ops/teams/${westTeam.data.team.id}/issue-code`, { method: "POST", staff, body: {} });
   const added = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [south.data.participant.id], targetTeamId: northTeam.data.team.id } });
   assert.equal(added.response.status, 200);
-  const southView = await call(worker, db, "/api/state", { client: "south-phone" }); assert.equal(southView.data.currentTeam.teamCode, "DISPATCH-001");
+  const southView = await call(worker, db, "/api/state", { client: "south-phone" }); assert.equal(southView.data.currentTeam.gamePortalCode, "PORTAL-DISPATCH-001");
   const movedOut = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [north.data.participant.id], targetTeamId: "" } });
   assert.equal(movedOut.response.status, 200); const northView = await call(worker, db, "/api/state", { client: "north-phone" }); assert.equal(northView.data.currentTeam, null);
   const dissolved = await call(worker, db, "/api/ops/assignments", { method: "POST", staff, body: { participantIds: [west.data.participant.id], targetTeamId: "" } });
@@ -405,7 +420,6 @@ test("Staff dispatch is atomic: code visibility follows membership and Admin rec
   assert.equal(reclaimed.response.status, 200);
   const state = await call(worker, db, "/api/ops/state", { staff });
   assert.equal(state.data.teams.find((team) => team.id === westTeam.data.team.id).status, "dissolved");
-  assert.equal(state.data.codeSummary.workshop.available, 1);
   assert.equal(state.data.codeSummary.gamePortal.available, 1);
 });
 
@@ -589,8 +603,8 @@ test("Admin archive reset requires the event name, preserves only the current se
   const reset = await call(worker, db, "/api/admin/event/archive-reset", { method: "POST", staff, admin, body: { confirmation: "Agentic Football 现场运营台" } });
   assert.equal(reset.response.status, 200);
   assert.equal(reset.data.archive.counts.participants, 1);
-  assert.equal(reset.data.archive.counts.workshopCodes, 1);
-  assert.deepEqual(reset.data.codeSummary.workshop, { total: 0, available: 0, issued: 0 });
+  assert.equal("workshopCodes" in reset.data.archive.counts, false);
+  assert.deepEqual(reset.data.codeSummary.gamePortal, { total: 0, available: 0, issued: 0 });
 
   const after = await call(worker, db, "/api/admin/state", { staff, admin });
   assert.equal(after.response.status, 200);
@@ -605,6 +619,7 @@ test("Admin archive reset requires the event name, preserves only the current se
   const raw = JSON.parse(db.row.data);
   assert.equal(raw.archives.length, 1);
   assert.equal(raw.archives[0].snapshot.participants[0].nickname, "归档参与者");
-  assert.equal(raw.archives[0].snapshot.workshopCodes[0].code, "ARCHIVE-1");
+  assert.equal("workshopCodes" in raw.archives[0].snapshot, false);
+  assert.equal(raw.archives[0].snapshot.gamePortalCodes[0].code, "PORTAL-ARCHIVE-1");
   assert.ok(raw.auditLog.some((item) => item.action === "event.archived_reset"));
 });

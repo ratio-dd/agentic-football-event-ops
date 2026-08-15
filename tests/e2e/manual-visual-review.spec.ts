@@ -50,11 +50,12 @@ test.describe("人工视觉审核画廊（仅 CAPTURE_VISUAL_REVIEW=1）", () =>
     await page.reload();
     await expect(page.getByText("队伍编号", { exact: true })).toBeVisible();
     await capture(page, testInfo, "03-participant-confirmed-solo-team");
-    const workshopCodes = Array.from({ length: 12 }, (_, index) => `VISUAL-WORKSHOP-${stamp}-${index + 1}`);
-    await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `VISUAL-PORTAL-${code}`) } });
+    const gamePortalCodes = Array.from({ length: 12 }, (_, index) => `VISUAL-PORTAL-${stamp}-${index + 1}`);
+    await api(request, "/api/ops/codes/import", { method: "POST", staff, admin, body: { gamePortalCodes } });
     await api(request, `/api/ops/teams/${selfTeam.id}/issue-code`, { method: "POST", staff, body: {} });
     await page.goto("/");
-    await expect(page.getByText("Workshop Code", { exact: true })).toBeVisible();
+    await expect(page.getByText("Workshop 入口", { exact: true })).toBeVisible();
+    await expect(page.getByText("Game Portal Code", { exact: true })).toBeVisible();
     await capture(page, testInfo, "04-participant-code");
     await api(request, `/api/ops/qualification/teams/${selfTeam.id}/confirm`, { method: "POST", staff, body: {} });
     await page.reload();

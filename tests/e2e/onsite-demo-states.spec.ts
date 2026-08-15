@@ -32,8 +32,8 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   const participant = await api(request, "/api/participants", { method: "POST", client, body: { nickname: `资源参赛者${stamp}`, supportProfile: {} } });
   const login = await staffSession(request, `资源 TA ${stamp}`); const admin = await adminSession(request, login.staffSession);
   const team = await api(request, "/api/ops/teams", { method: "POST", staff: login.staffSession, body: { memberIds: [participant.participant.id] } });
-  const workshopCodes = Array.from({ length: 5 }, (_, index) => `E2E-WORKSHOP-${stamp}-${index + 1}`);
-  await api(request, "/api/ops/codes/import", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { workshopCodes, gamePortalCodes: workshopCodes.map((code) => `E2E-PORTAL-${code}`) } });
+  const gamePortalCodes = Array.from({ length: 5 }, (_, index) => `E2E-PORTAL-${stamp}-${index + 1}`);
+  await api(request, "/api/ops/codes/import", { method: "POST", staff: login.staffSession, admin: admin.adminSession, body: { gamePortalCodes } });
   await api(request, "/api/ops/event-links", { method: "PUT", staff: login.staffSession, admin: admin.adminSession, body: { workshopUrl: "https://example.com/workshop-e2e", gamePortalUrl: "https://agentic-football.aws.dev/" } });
   await api(request, `/api/ops/teams/${team.team.id}/issue-code`, { method: "POST", staff: login.staffSession, body: {} });
 
@@ -52,9 +52,11 @@ test("Staff 在 Workshop 页确认练习赛，参与者看到资源与比赛入�
   await page.evaluate(() => sessionStorage.clear());
   await page.addInitScript((id) => localStorage.setItem("afc-event-ops-client", id), client);
   await page.goto("/");
-  await expect(page.locator(".code-card")).toContainText("Workshop Code");
+  await expect(page.locator(".code-card")).toContainText("Workshop 入口");
+  await expect(page.locator(".code-card")).toContainText("Game Portal Code");
+  await expect(page.locator(".code-card")).not.toContainText("Workshop Code");
   await expect(page.getByRole("link", { name: "进入 Workshop" })).toHaveAttribute("href", "https://example.com/workshop-e2e");
-  await expect(page.getByRole("link", { name: "打开 Game Portal" })).toHaveAttribute("href", "https://agentic-football.aws.dev/");
+  await expect(page.getByRole("link", { name: "进入 Game Portal" })).toHaveAttribute("href", "https://agentic-football.aws.dev/");
   await expect(page.getByText("已确认参加比赛", { exact: true })).toBeVisible();
   await expect(page.getByText("赛程将在名单冻结后公布。", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("participant-resource-links.png"), fullPage: true });
@@ -121,21 +123,18 @@ test("Admin 追加导入 Code、库存统计与全选切换保持一致", async 
   for (let index = 1; index <= 2; index += 1) { const registered = await api(request, "/api/participants", { method: "POST", client: `admin-code-ui-${stamp}-${index}`, body: { nickname: `Code界面${stamp}-${index}`, supportProfile: {} } }); acceptanceTeamIds.push(registered.team.id); }
   const baselineLogin = await staffSession(request, `Code 基线 ${stamp}`); const baselineAdmin = await adminSession(request, baselineLogin.staffSession);
   const baseline = await api(request, "/api/admin/state", { staff: baselineLogin.staffSession, admin: baselineAdmin.adminSession });
-  const beforeWorkshop = baseline.codeSummary.workshop; const beforePortal = baseline.codeSummary.gamePortal;
-  const unissuedCount = baseline.teams.filter((team: { status: string; workshopCodeId?: string; gamePortalCodeId?: string }) => team.status !== "dissolved" && !team.workshopCodeId && !team.gamePortalCodeId).length;
+  const beforePortal = baseline.codeSummary.gamePortal;
+  const unissuedCount = baseline.teams.filter((team: { status: string; gamePortalCodeId?: string }) => team.status !== "dissolved" && !team.gamePortalCodeId).length;
   await staffLogin(page, `Code Admin ${stamp}`);
   await page.getByRole("button", { name: "更多", exact: true }).click();
   await page.getByLabel("Admin PIN").fill("meetup-admin");
   await page.getByRole("button", { name: "进入管理后台" }).click();
   await page.getByRole("button", { name: "资源管理" }).click();
 
-  const workshopMetric = page.locator(".admin-metrics article").filter({ hasText: "Workshop 可用" });
-  const portalMetric = page.locator(".admin-metrics article").filter({ hasText: "Game Portal 可用" });
-  await page.getByLabel("Workshop Code").fill(`UI-W-${stamp}-1\nUI-W-${stamp}-1\nUI-W-${stamp}-2`);
+  const portalMetric = page.locator(".admin-metrics article").filter({ hasText: "Game Portal Code" });
   await page.getByLabel("Game Portal Code").fill(`UI-G-${stamp}-1\nUI-G-${stamp}-1\nUI-G-${stamp}-2`);
   await page.getByRole("button", { name: "导入已填写的 Code" }).click();
-  await expect(page.locator(".notice")).toContainText("已新增 Workshop 2 个、Game Portal 2 个；跳过重复 2 个。");
-  await expect(workshopMetric).toContainText(`${beforeWorkshop.available + 2} 可用`); await expect(workshopMetric).toContainText(`总计 ${beforeWorkshop.total + 2} · 已发 ${beforeWorkshop.issued}`);
+  await expect(page.locator(".notice")).toContainText("已新增 Game Portal 2 个；跳过重复 1 个。");
   await expect(portalMetric).toContainText(`${beforePortal.available + 2} 可用`); await expect(portalMetric).toContainText(`总计 ${beforePortal.total + 2} · 已发 ${beforePortal.issued}`);
 
   const teamChecks = page.locator('#admin-batch-issue input[name="teamId"]');
@@ -147,22 +146,19 @@ test("Admin 追加导入 Code、库存统计与全选切换保持一致", async 
   expect(adminStateRequests).toBe(requestsBeforeWait); await expect(checkedTeams).toHaveCount(0);
   await page.getByRole("button", { name: "全选", exact: true }).click();
   await expect(checkedTeams).toHaveCount(unissuedCount);
-  await page.route("**/api/ops/codes/batch-issue", (route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "库存不足：还需 Workshop 1 个、Game Portal 1 个" }) }), { times: 1 });
+  await page.route("**/api/ops/codes/batch-issue", (route) => route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "库存不足：还需 Game Portal 1 个" }) }), { times: 1 });
   const shortageDialog = page.waitForEvent("dialog");
-  await page.getByRole("button", { name: "向所选队伍发放 Workshop + Game Portal Code" }).click();
-  const dialog = await shortageDialog; expect(dialog.type()).toBe("alert"); expect(dialog.message()).toBe("库存不足：还需 Workshop 1 个、Game Portal 1 个"); await dialog.accept();
-  await expect(page.locator(".notice")).toContainText("库存不足：还需 Workshop 1 个、Game Portal 1 个");
+  await page.getByRole("button", { name: "向所选队伍发放 Game Portal Code" }).click();
+  const dialog = await shortageDialog; expect(dialog.type()).toBe("alert"); expect(dialog.message()).toBe("库存不足：还需 Game Portal 1 个"); await dialog.accept();
+  await expect(page.locator(".notice")).toContainText("库存不足：还需 Game Portal 1 个");
   await page.getByRole("button", { name: "取消全选" }).click();
   for (const teamId of acceptanceTeamIds) await page.locator(`#admin-batch-issue input[name="teamId"][value="${teamId}"]`).check();
   await expect(checkedTeams).toHaveCount(acceptanceTeamIds.length);
-  await page.getByRole("button", { name: "向所选队伍发放 Workshop + Game Portal Code" }).click();
-  await expect(workshopMetric).toContainText(`${beforeWorkshop.available} 可用`); await expect(workshopMetric).toContainText(`总计 ${beforeWorkshop.total + 2} · 已发 ${beforeWorkshop.issued + 2}`);
+  await page.getByRole("button", { name: "向所选队伍发放 Game Portal Code" }).click();
   await expect(portalMetric).toContainText(`${beforePortal.available} 可用`); await expect(portalMetric).toContainText(`总计 ${beforePortal.total + 2} · 已发 ${beforePortal.issued + 2}`);
 
-  await page.getByLabel("Workshop Code").fill(`UI-W-${stamp}-3`);
   await page.getByLabel("Game Portal Code").fill(`UI-G-${stamp}-3`);
   await page.getByRole("button", { name: "导入已填写的 Code" }).click();
-  await expect(page.locator(".notice")).toContainText("已新增 Workshop 1 个、Game Portal 1 个。");
-  await expect(workshopMetric).toContainText(`${beforeWorkshop.available + 1} 可用`); await expect(workshopMetric).toContainText(`总计 ${beforeWorkshop.total + 3} · 已发 ${beforeWorkshop.issued + 2}`);
+  await expect(page.locator(".notice")).toContainText("已新增 Game Portal 1 个。");
   await expect(portalMetric).toContainText(`${beforePortal.available + 1} 可用`); await expect(portalMetric).toContainText(`总计 ${beforePortal.total + 3} · 已发 ${beforePortal.issued + 2}`);
 });

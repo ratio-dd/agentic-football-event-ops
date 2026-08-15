@@ -14,7 +14,7 @@ Football Workbench 不替代 AWS Workshop、Game Portal、外部报名系统或�
 | --- | --- |
 | 参与者入口 | 昵称登记与唯一性校验、自动生成一人队伍、浏览器绑定和昵称恢复、查看本队资源和个人赛程、提交反馈。 |
 | 现场编组 | Staff PIN 会话、按昵称搜索参与者；参与者登记后立即成为已确认的单人队，Staff 可合并或调整队伍。 |
-| 资源与资格 | Admin 导入 Workshop Code 和 Game Portal Code；Staff 按队发放、记录 Workshop 备注并确认参赛资格；Admin 可诊断资源、补发或回收 Code，并处理资格例外。 |
+| 资源与资格 | 所有参与者使用统一 Workshop 入口；Admin 导入 Game Portal Code，Staff 按队发放、记录 Workshop 备注并确认参赛资格；Admin 可诊断、补发或回收 Game Portal Code，并处理资格例外。 |
 | 比赛运营 | Admin 冻结参赛名单、按 4–32 支实际队数生成小组赛、逐轮开放小组赛和淘汰赛；Staff 只录入当前轮赛果；系统计算积分并提供公开只读现场大屏。 |
 | 运行基础 | 操作审计、阶段开关、活动归档重置、SQLite 持久化、健康检查，以及分离的 feedback/live 部署配置。 |
 
